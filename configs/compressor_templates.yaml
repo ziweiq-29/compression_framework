@@ -1,0 +1,12 @@
+compressors:
+  sz3:
+    compress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 -f -i {input} -z {compressed} -3 {dims} -M {mode} {arg} -a"
+    decompress_template: "./sz3 -x -i {compressed} -o {decompressed}"
+
+  # zstd:
+  #   compress_template: "zstd -{level} -o {compressed} {input}"
+  #   decompress_template: "zstd -d -o {decompressed} {compressed}"
+
+  qoz: 
+    compress_template: "/home/ziweiq2/HPEZ/build/bin/hpez -f -i {input} -z {compressed} -3 {dims} -M {mode} {arg} -a"
+    decompress_template: "./hpez -x -i {compressed} -o {decompressed}"
