@@ -14,3 +14,10 @@ python main.py \
 
 run a specific dataset(e.g. NYX):
 
+python batch_run.py \
+   --dataset_dir dataset/NYX  \
+   --dims "512 512 512" \  
+   --compressor qoz  \
+   --mode REL  \ 
+   --sweep 1e-4 1e-3 1e-2 \
+    --results_csv all_results.csv
