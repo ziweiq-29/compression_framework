@@ -53,9 +53,9 @@ for fname in files:
     subprocess.run(cmd, check=True)
 
     if os.path.exists("results.csv"):
-        # os.rename("results.csv", output_csv)
-        # print(f"✅ Saved to {output_csv}")
-        df = pd.read_csv("results.csv")
+        os.rename("results.csv", output_csv)
+        print(f"✅ Saved to {output_csv}")
+        df = pd.read_csv(output_csv)   # ✅ 用新文件名来读！
         df["input_file"] = fname
         all_results.append(df)
     else:
