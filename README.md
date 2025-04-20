@@ -1,7 +1,7 @@
 
 In compressor_templates.yaml change the actual path of compressors...
 
-
+Now only have two compressors, sz3 and qoz. Feel free to replace qoz with sz3 in the commands below.
 
 run single file:
 python main.py \
