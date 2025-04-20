@@ -1,5 +1,5 @@
 
-In compressor_templates.yaml change the actual path of compressors
+In compressor_templates.yaml change the actual path of compressors...
 
 
 
