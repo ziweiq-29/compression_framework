@@ -1,4 +1,4 @@
-name,compress_time,compression_ratio,compressor
-QoZ-rel1e-4,6.2884,16.2458,qoz
-QoZ-rel1e-3,5.7679,100.9477,qoz
-QoZ-rel1e-2,4.8096,1125.6501,qoz
+compress_time,compression_ratio,compressor
+4.5069,15.2731,sz3
+3.6238,97.6015,sz3
+2.9673,1484.4466,sz3

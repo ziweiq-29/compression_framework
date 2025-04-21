@@ -27,8 +27,15 @@ all_results = []
 # Ensure results directory exists
 os.makedirs(args.results_dir, exist_ok=True)
 
-files = sorted(f for f in os.listdir(args.dataset_dir)
-               if os.path.isfile(os.path.join(args.dataset_dir, f)))
+# 只保留非 .txt 结尾的文件（例如 .f32、.dat）
+files = sorted(
+    f for f in os.listdir(args.dataset_dir)
+    if os.path.isfile(os.path.join(args.dataset_dir, f)) and not f.endswith(".txt")
+)
+
+
+# files = sorted(f for f in os.listdir(args.dataset_dir)
+#                if os.path.isfile(os.path.join(args.dataset_dir, f)))
 
 
 for fname in files:

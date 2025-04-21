@@ -50,17 +50,25 @@ elif args.compressor == "qoz":
             compressed=compressed_file,
             dims=args.dims,
             mode=cfg["mode"],
-            arg=cfg["arg"]
+            arg=cfg["arg"],
+            error_bound=cfg["error_bound"]
         )
         # decompress_cmd = qoz_templates["decompress_template"].format(
         #     compressed=compressed_file,
         #     decompressed=decompressed_file
         # )
-        result = run_pipeline(cfg["name"], {
+        
+        # print("check: ",compress_cmd['arg '])
+        result={}
+        result["name"] = "qoz"
+        result["compression_ratio"] = run_pipeline(cfg["name"], {
             "compress_cmd": compress_cmd,
-            # "decompress_cmd": decompress_cmd
-        }, args.input, compressed_file, decompressed_file)
-        result["compressor"] = "qoz"
+        }, args.input, compressed_file, decompressed_file)["compression_ratio"]
+        result["compress_time"] = run_pipeline(cfg["name"], {
+            "compress_cmd": compress_cmd,
+        }, args.input, compressed_file, decompressed_file)["compress_time"]
+        result["mode"] = cfg["mode"]
+        result["error_bound"] = cfg["error_bound"]
         results.append(result)
 
 
