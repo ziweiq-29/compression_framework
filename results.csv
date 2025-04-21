@@ -1,0 +1,4 @@
+name,compression_ratio,compress_time,mode,error_bound
+qoz,1877.7882,3.7968,REL,1e-4
+qoz,7308.045,3.4837,REL,1e-3
+qoz,18315.1132,3.0882,REL,1e-2
