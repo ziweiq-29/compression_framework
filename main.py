@@ -30,16 +30,23 @@ if args.compressor == "sz3":
             compressed=compressed_file,
             dims=args.dims,
             mode=cfg["mode"],
-            arg=cfg["arg"]
+            arg=cfg["arg"],
+            error_bound=cfg["error_bound"]
         )
         # decompress_cmd = sz3_templates["decompress_template"].format(
         #     compressed=compressed_file,
         #     decompressed=decompressed_file
-        result = run_pipeline(cfg["name"], {
+        
+        result={}
+        result["name"] = "sz3"
+        result["compression_ratio"] = run_pipeline(cfg["name"], {
             "compress_cmd": compress_cmd,
-            # "decompress_cmd": decompress_cmd
-        }, args.input, compressed_file, decompressed_file)
-        result["compressor"] = "sz3"
+        }, args.input, compressed_file, decompressed_file)["compression_ratio"]
+        result["compress_time"] = run_pipeline(cfg["name"], {
+            "compress_cmd": compress_cmd,
+        }, args.input, compressed_file, decompressed_file)["compress_time"]
+        result["mode"] = cfg["mode"]
+        result["error_bound"] = cfg["error_bound"]
         results.append(result)
         
 elif args.compressor == "qoz":

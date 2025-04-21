@@ -8,7 +8,7 @@ def get_sz3_configs(args):
             "name": name,
             "mode": args.mode,
             "arg": f"{arg_flag} {val}",
-            "error_bound": {val}
+            "error_bound": val
         })
     return configs
 

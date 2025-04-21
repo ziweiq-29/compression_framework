@@ -1,4 +1,4 @@
-compress_time,compression_ratio,compressor
-5.9341,16.821,sz3
-3.6493,109.8079,sz3
-4.3496,1901.6397,sz3
+name,compression_ratio,compress_time,mode,error_bound
+sz3,16.821,6.0311,REL,1e-4
+sz3,109.8079,3.6331,REL,1e-3
+sz3,1901.6397,4.3139,REL,1e-2
