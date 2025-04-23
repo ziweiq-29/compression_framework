@@ -21,3 +21,7 @@ python batch_run.py \
    --mode REL  \ 
    --sweep 1e-4 1e-3 1e-2 \
     --results_csv all_results.csv
+
+
+Adding Qcat(https://github.com/JLiu-1/qcat#) Metrics: 
+1. install Qcat into the project.
