@@ -25,3 +25,15 @@ python batch_run.py \
 
 Adding Qcat(https://github.com/JLiu-1/qcat#) Metrics: 
 1. install Qcat into the project.
+2. e.g. run the command: 
+
+
+python main.py 
+--compressor sz3 
+--mode REL 
+--value 1e-2 
+--dims "512 512 512" 
+--input dataset/NYX/baryon_density.f32 
+--enable-qcat 
+--datatype f
+
