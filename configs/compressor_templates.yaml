@@ -1,9 +1,14 @@
 compressors:
   sz3:
     compress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 -f -i {input} -z {compressed} -3 {dims} -M {mode} {arg} -a"
-    decompress_template: "./sz3 -x -i {compressed} -o {decompressed}"
+    decompress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 -f -z {compressed} -i {input} -o {decompressed} -3 {dims} -M {mode} {error_bound} -a"
+
+
 
 
   qoz: 
     compress_template: "/home/ziweiq2/HPEZ/build/bin/hpez -f -i {input} -z {compressed} -3 {dims} -M {mode} {arg} -a"
-    decompress_template: "./hpez -x -i {compressed} -o {decompressed}"
+    decompress_template: "/home/ziweiq2/HPEZ/build/bin/hpez -f -z {compressed} -i {input} -o {decompressed} -3 {dims} -M {mode} {error_bound} -a"
+  qcat:
+    evaluators:
+        ssim: "/home/ziweiq2/compression_framework/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"

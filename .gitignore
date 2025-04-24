@@ -3,6 +3,9 @@ __pycache__/
 *.dat
 tmp_compressed
 results.csvwq
+/qcat
+/include
+/lib
 
 id_ed25519_school
 id_ed25519_school.pub

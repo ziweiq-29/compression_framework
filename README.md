@@ -28,12 +28,27 @@ Adding Qcat(https://github.com/JLiu-1/qcat#) Metrics:
 2. e.g. run the command: 
 
 
-python main.py 
---compressor sz3 
---mode REL 
---value 1e-2 
---dims "512 512 512" 
---input dataset/NYX/baryon_density.f32 
---enable-qcat 
+Single file:
+python main.py \
+--compressor sz3 \
+--mode REL \
+--sweep 1e-4 1e-3 1e-2 \
+--dims "512 512 512" \
+--input dataset/NYX/baryon_density.f32 \
+--enable-qcat \
 --datatype f
+
+Dataset:
+
+
+python batch_run.py \
+--dataset_dir dataset/NYX \
+--dims "512 512 512" \
+--compressor sz3 \
+--mode REL \
+--sweep 1e-4 1e-3 1e-2 \
+--enable-qcat \
+--datatype f \
+--results_csv all_results.csv
+
 

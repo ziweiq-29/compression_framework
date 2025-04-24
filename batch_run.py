@@ -14,6 +14,8 @@ parser.add_argument("--dims", required=True, help="Data dimensions, e.g. '512 51
 parser.add_argument("--compressor", default="qoz", help="Compressor name")
 parser.add_argument("--mode", default="REL", help="Compression mode (ABS, REL, etc.)")
 parser.add_argument("--results_dir", default="results", help="Directory to save result CSVs")
+parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
+parser.add_argument("--datatype", choices=["f", "d"], help="Data type for qcat (-f or -d)")
 parser.add_argument(
     "--results_csv",                 
     default="results.csv",
@@ -42,7 +44,7 @@ for fname in files:
     input_path = os.path.join(args.dataset_dir, fname)
     output_csv = os.path.join(args.results_dir, fname + ".csv")
 
-
+    
     cmd = [
         "python", "main.py",
         "--compressor", args.compressor,
@@ -55,6 +57,14 @@ for fname in files:
         cmd.extend(["--sweep", *args.sweep])
     elif args.value:
         cmd.extend(["--value", args.value])
+        
+    if args.enable_qcat:
+        cmd.append("--enable-qcat")
+        if args.datatype:
+            cmd.extend(["--datatype", args.datatype])
+        else:
+            print("⚠️ --datatype is required when --enable-qcat is used.")
+            continue  # Skip this file if datatype is missing
     
     print(f"🔹 Running on {fname}...")
     subprocess.run(cmd, check=True)
