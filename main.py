@@ -9,7 +9,7 @@ from qcat_runner import run_evaluators
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--compressor", required=True, choices=["sz3", "qoz"])
-parser.add_argument("--mode", choices=["ABS", "REL"])
+parser.add_argument("--mode", choices=["ABS", "REL","PSNR","NORM"])
 parser.add_argument("--value", type=str, help="Single error bound value")
 parser.add_argument("--sweep", nargs="*", help="Sweep a list of error bounds")
 parser.add_argument("--level", type=int, help="zstd compression level")
@@ -17,6 +17,8 @@ parser.add_argument("--dims", type=str, required=True, help="3D data dimensions,
 parser.add_argument("--input", required=True)
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
 parser.add_argument("--datatype", choices=["f", "d"], help="Data type for qcat (-f or -d)")
+parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
+                    help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
 args = parser.parse_args()
 
 compressed_file = "tmp_compressed"
@@ -25,8 +27,6 @@ decompressed_file = os.path.abspath("tmp_decompressed.sz.out")
 
 with open("configs/compressor_templates.yaml") as f:
     compressor_templates = yaml.safe_load(f)["compressors"]
-
-# results = []
 
 if args.compressor == "sz3":
     results = []
@@ -52,7 +52,7 @@ if args.compressor == "sz3":
             arg=cfg["arg"],
             error_bound=cfg["error_bound"]
         )
-        # print(f"[DEBUG] Running compress: {compress_cmd}")
+        print(f"[DEBUG] Running compress: {compress_cmd}")
         # print(f"[DEBUG] Running decompress: {decompress_cmd}")
         
         result={}
@@ -77,9 +77,10 @@ if args.compressor == "sz3":
         if args.enable_qcat:
             qcat_results = {}
             qcat_templates = compressor_templates["qcat"]["evaluators"]
+            evaluator_keys = args.qcat_evaluators.split(",")
             qcat_results = run_evaluators(
                 evaluator_templates=qcat_templates,
-                evaluator_keys=["ssim","pdf"],  # 或根据 args 参数决定哪些分析器
+                evaluator_keys=evaluator_keys,  # 或根据 args 参数决定哪些分析器
                 datatype=args.datatype,
                 input=args.input,
                 decompressed=decompressed_file,
@@ -145,9 +146,10 @@ elif args.compressor == "qoz":
         if args.enable_qcat:
             qcat_results = {}
             qcat_templates = compressor_templates["qcat"]["evaluators"]
+            evaluator_keys = args.qcat_evaluators.split(",")
             qcat_results = run_evaluators(
                 evaluator_templates=qcat_templates,
-                evaluator_keys=["ssim", "pdf"],  # 或根据 args 参数决定哪些分析器
+                evaluator_keys=evaluator_keys,  
                 datatype=args.datatype,
                 input=args.input,
                 decompressed=decompressed_file,

@@ -1,4 +1,2 @@
-compressor name,compression_ratio,compress_time,mode,error_bound,qcat_ssim
-qoz,15.5019,5.5538,REL,1e-4,0.999608
-qoz,88.6915,5.1422,REL,1e-3,0.991756
-qoz,972.5482,4.3268,REL,1e-2,0.868005
+compressor name,compression_ratio,compress_time,mode,error_bound,max_abs_error,max_rel_error_,max_pw_rel_error,psnr,nrmse,normerr,normerr_norm,pearson,qcat_ssim
+sz3,84.6752,4.6336,REL,1e-3,72324.21875,0.001,2479099.366108,67.866798,0.00040425935635678514,338726304.777607,0.008818,0.999961,0.981571

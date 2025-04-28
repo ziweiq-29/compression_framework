@@ -16,6 +16,8 @@ parser.add_argument("--mode", default="REL", help="Compression mode (ABS, REL, e
 parser.add_argument("--results_dir", default="results", help="Directory to save result CSVs")
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
 parser.add_argument("--datatype", choices=["f", "d"], help="Data type for qcat (-f or -d)")
+parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
+                    help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
 parser.add_argument(
     "--results_csv",                 
     default="results.csv",
@@ -65,6 +67,9 @@ for fname in files:
         else:
             print("⚠️ --datatype is required when --enable-qcat is used.")
             continue  # Skip this file if datatype is missing
+    if args.qcat_evaluators:
+        cmd.extend(["--qcat-evaluators", args.qcat_evaluators])
+    print("cmd: ",cmd)
     
     print(f"🔹 Running on {fname}...")
     subprocess.run(cmd, check=True)

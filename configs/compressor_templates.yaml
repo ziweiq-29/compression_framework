@@ -12,3 +12,4 @@ compressors:
   qcat:
     evaluators:
         ssim: "/home/ziweiq2/compression_framework/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"
+        compareData: "/home/ziweiq2/compression_framework/bin/compareData {datatype} {input} {decompressed}"
