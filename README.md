@@ -30,6 +30,8 @@ Adding Qcat(https://github.com/JLiu-1/qcat#) Metrics:
 
 mode:
 support ABS, REL, PSNR, NORM
+qcat-evaluators:
+support ssim, compareData
 
 
 Single file:
@@ -53,7 +55,7 @@ python batch_run.py \
 --sweep 1e-3 1e-2 \
 --enable-qcat \
 --datatype f \
---qcat-evaluators "compareData,ssim" \ //only implemented these
+--qcat-evaluators "compareData,ssim" 
 --results_csv all_results.csv
 
 
