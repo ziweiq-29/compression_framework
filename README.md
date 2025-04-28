@@ -28,6 +28,10 @@ Adding Qcat(https://github.com/JLiu-1/qcat#) Metrics:
 2. e.g. run the command: 
 
 
+mode:
+support ABS, REL, PSNR, NORM
+
+
 Single file:
 python main.py \
 --compressor sz3 \
@@ -45,7 +49,7 @@ python batch_run.py \
 --dataset_dir dataset/NYX \
 --dims "512 512 512" \
 --compressor sz3 \
---mode REL \ //support ABS, REL, PSNR, NORM
+--mode REL \                                                 
 --sweep 1e-3 1e-2 \
 --enable-qcat \
 --datatype f \
