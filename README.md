@@ -45,10 +45,14 @@ python batch_run.py \
 --dataset_dir dataset/NYX \
 --dims "512 512 512" \
 --compressor sz3 \
---mode REL \
---sweep 1e-4 1e-3 1e-2 \
+--mode REL \ //support ABS, REL, PSNR, NORM
+--sweep 1e-3 1e-2 \
 --enable-qcat \
 --datatype f \
+--qcat-evaluators "compareData,ssim" \ //only implemented these
 --results_csv all_results.csv
+
+
+
 
 
