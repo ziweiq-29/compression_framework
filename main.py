@@ -16,13 +16,16 @@ parser.add_argument("--level", type=int, help="zstd compression level")
 parser.add_argument("--dims", type=str, required=True, help="3D data dimensions, e.g. '512 512 512'")
 parser.add_argument("--input", required=True)
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
-parser.add_argument("--datatype", choices=["f", "d"], help="Data type for qcat (-f or -d)")
+parser.add_argument("--datatype", choices=["f", "d"], required=True, help="Data type (f for float, d for double)")
 parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
                     help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
 args = parser.parse_args()
 
 compressed_file = "tmp_compressed"
 args.input = os.path.abspath(args.input)
+input_file_name = os.path.basename(args.input)
+# print("args input is:///////", args.input)
+# print("Extracted input file name:", input_file_name)
 decompressed_file = os.path.abspath("tmp_decompressed.sz.out")
 
 with open("configs/compressor_templates.yaml") as f:
@@ -33,25 +36,29 @@ if args.compressor == "sz3":
     
     sz3_templates = compressor_templates["sz3"]
     for cfg in config_registry.get_sz3_configs(args):
+        # print("[DEBUG] Compress cfg:", cfg)
         compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.compressed")
         decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.sz.out")
         compress_cmd = sz3_templates["compress_template"].format(
             input=args.input,
-            compressed=compressed_file,
-            dims=args.dims,
-            mode=cfg["mode"],
-            arg=cfg["arg"],
-            error_bound=cfg["error_bound"]
-        )
-        decompress_cmd = sz3_templates["decompress_template"].format(
-            input=args.input,
-            compressed=compressed_file,
             decompressed=decompressed_file,
             dims=args.dims,
             mode=cfg["mode"],
             arg=cfg["arg"],
-            error_bound=cfg["error_bound"]
+            error_bound=cfg["error_bound"],
+            datatype=cfg["datatype"]
         )
+        # print("[DEBUG] Decompress cfg:", cfg)
+        # decompress_cmd = sz3_templates["decompress_template"].format(
+        #     input=args.input,
+        #     compressed=compressed_file,
+        #     decompressed=decompressed_file,
+        #     dims=args.dims,
+        #     mode=cfg["mode"],
+        #     arg=cfg["arg"],
+        #     error_bound=cfg["error_bound"],
+        #     datatype=cfg["datatype"]
+        # )
         print(f"[DEBUG] Running compress: {compress_cmd}")
         # print(f"[DEBUG] Running decompress: {decompress_cmd}")
         
@@ -59,19 +66,32 @@ if args.compressor == "sz3":
         result["compressor name"] = "sz3"
         result_metrics={}
         
-        result_metrics = run_pipeline(cfg["name"], {
-            "compress_cmd": compress_cmd,
-            "decompress_cmd": decompress_cmd,
-        }, args.input, compressed_file, decompressed_file)
+        result_metrics = run_pipeline(
+            cfg["name"], 
+            {
+                "compress_cmd": compress_cmd,
+            }, 
+            args.input, 
+            compressed_file
+        )
         
-        if not os.path.exists(decompressed_file):
-            print(f"[ERROR] Decompression failed, missing output file: {decompressed_file}")
-            continue
+        # if not os.path.exists(decompressed_file):
+        #     print(f"[ERROR] Decompression failed, missing output file: {decompressed_file}")
+        #     continue
         
+        dtype_map = {
+    "-f": "single precision",
+    "-d": "double precision"
+}
+        
+        result["input_file(B)"] = input_file_name
+        result["data_type"] = dtype_map.get(cfg["datatype"])
         result["compression_ratio"] = result_metrics["compression_ratio"]
-        result["compress_time"] = result_metrics["compress_time"]
+        result["compress_time(s)"] = result_metrics["compress_time"]
         result["mode"] = cfg["mode"]
         result["error_bound"] = cfg["error_bound"]
+        result["decompress_time(s)"] = result_metrics["decompress_time"]
+        result["ori_size(B)"] = result_metrics["size_of_file"]
         
 
         if args.enable_qcat:
@@ -86,7 +106,7 @@ if args.compressor == "sz3":
                 decompressed=decompressed_file,
                 dims=args.dims
             )
-            # print(f"[DEBUG] qcat_results: {qcat_results}")
+            print(f"[DEBUG] qcat_results: {qcat_results}")
             result.update(qcat_results)
         results.append(result)   
 
@@ -102,45 +122,60 @@ elif args.compressor == "qoz":
     
     qoz_templates = compressor_templates["qoz"]
     for cfg in config_registry.get_QoZ_configs(args):
-        compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.qoz")
+        # compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.qoz")
+        # decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.qoz.out")
+        compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.compressed")
         decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.qoz.out")
+        
         compress_cmd = qoz_templates["compress_template"].format(
             input=args.input,
-            compressed=compressed_file,
-            dims=args.dims,
-            mode=cfg["mode"],
-            arg=cfg["arg"],
-            error_bound=cfg["error_bound"]
-        )
-        # print(f"[DEBUG] Running compress: {compress_cmd}")
-        decompress_cmd = qoz_templates["decompress_template"].format(
-            input=args.input,
-            compressed=compressed_file,
             decompressed=decompressed_file,
             dims=args.dims,
             mode=cfg["mode"],
             arg=cfg["arg"],
-            error_bound=cfg["error_bound"]
+            error_bound=cfg["error_bound"],
+            datatype=cfg["datatype"]
         )
+        print(f"[DEBUG] Running compress: {compress_cmd}")
+        # decompress_cmd = qoz_templates["decompress_template"].format(
+        #     input=args.input,
+        #     compressed=compressed_file,
+        #     decompressed=decompressed_file,
+        #     dims=args.dims,
+        #     mode=cfg["mode"],
+        #     arg=cfg["arg"],
+        #     error_bound=cfg["error_bound"]
+        # )
         # print(f"[DEBUG] Running decompress: {decompress_cmd}")
         # print(f"[DEBUG] Expecting decompressed file: {decompressed_file}")
         result={}
         result["compressor name"] = "qoz"
         result_metrics = {}
         
-        result_metrics = run_pipeline(cfg["name"], {
-            "compress_cmd": compress_cmd,
-            "decompress_cmd": decompress_cmd,
-        }, args.input, compressed_file, decompressed_file)
+        result_metrics = run_pipeline(
+            cfg["name"], 
+            {
+                "compress_cmd": compress_cmd,
+            }, 
+            args.input, 
+            compressed_file
+        )
         
-        if not os.path.exists(decompressed_file):
-            print(f"[ERROR] Decompression failed, missing output file: {decompressed_file}")
-            continue
-        
+        # if not os.path.exists(decompressed_file):
+        #     print(f"[ERROR] Decompression failed, missing output file: {decompressed_file}")
+        #     continue
+        dtype_map = {
+        "-f": "single precision",
+        "-d": "double precision"
+    }
+        result["input_file(B)"] = input_file_name
+        result["data_type"] = dtype_map.get(cfg["datatype"])
         result["compression_ratio"] = result_metrics["compression_ratio"]
-        result["compress_time"] = result_metrics["compress_time"]
+        result["compress_time(s)"] = result_metrics["compress_time"]
         result["mode"] = cfg["mode"]
         result["error_bound"] = cfg["error_bound"]
+        result["decompress_time(s)"] = result_metrics["decompress_time"]
+        result["ori_size(B)"] = result_metrics["size_of_file"]
         
         
         if args.enable_qcat:

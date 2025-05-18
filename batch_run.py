@@ -15,7 +15,7 @@ parser.add_argument("--compressor", default="qoz", help="Compressor name")
 parser.add_argument("--mode", default="REL", help="Compression mode (ABS, REL, etc.)")
 parser.add_argument("--results_dir", default="results", help="Directory to save result CSVs")
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
-parser.add_argument("--datatype", choices=["f", "d"], help="Data type for qcat (-f or -d)")
+parser.add_argument("--datatype", choices=["f", "d"], required=True, help="Data type (f for float, d for double)")
 parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
                     help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
 parser.add_argument(
@@ -41,7 +41,6 @@ files = sorted(
 # files = sorted(f for f in os.listdir(args.dataset_dir)
 #                if os.path.isfile(os.path.join(args.dataset_dir, f)))
 
-
 for fname in files:
     input_path = os.path.join(args.dataset_dir, fname)
     output_csv = os.path.join(args.results_dir, fname + ".csv")
@@ -52,7 +51,8 @@ for fname in files:
         "--compressor", args.compressor,
         "--mode", args.mode,
         "--dims", args.dims,
-        "--input", input_path
+        "--input", input_path,
+        "--datatype", args.datatype
     ]
 
     if args.sweep:

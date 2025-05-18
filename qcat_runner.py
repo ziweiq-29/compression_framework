@@ -60,6 +60,25 @@ def run_evaluators(evaluator_templates, evaluator_keys, datatype, input, decompr
                                 results[f"normerr"] = float(val)
                             elif "pearson coeff" in metric:
                                 results[f"pearson"] = float(val)
+                            elif "range" in metric:
+                                results["range"] = float(val)
+                            # elif "mean squared error" in metric:
+                            #     results["mse"] = float(val)
+                            elif "original mean" in metric:
+                                results["ori_mean"] = float(val)
+                            elif "original var" in metric:
+                                results["ori_var"] = float(val)
+                            elif "original std" in metric:
+                                results["ori_std"] = float(val)
+                            elif "decompressed mean" in metric:
+                                results["dec_mean"] = float(val)
+                            elif "decompressed var" in metric:
+                                results["dec_var"] = float(val)
+                            elif "decompressed std" in metric:
+                                results["dec_std"] = float(val)
+                            elif "standard deviation of difference" in metric:
+                                results["err_std"] = float(val)
+                        
                     except ValueError:
                         print(f"[QCAT] Warning: could not parse line: {line}")
                 
