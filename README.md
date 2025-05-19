@@ -60,5 +60,24 @@ python batch_run.py \
 
 
 
+using blockwise:
+python batch_run.py \
+--dataset_dir dataset/NYX \
+--dims "512 512 512" \
+--compressor sz3 \
+--mode REL \
+--sweep 1e-3 1e-2 \
+--enable-qcat \
+--datatype f \
+--qcat-evaluators "compareData,ssim" \
+--results_csv all_results.csv \
+--enable-calc_stats \
+--block-size 8 \
+--shift-size 8 \
+--output-prefix "block_stats"
+
+
+
+
 
 
