@@ -4,6 +4,7 @@ import pandas as pd
 from runner import run_pipeline
 import config_registry
 import os
+import subprocess
 from qcat_runner import run_evaluators
 
 
@@ -16,6 +17,10 @@ parser.add_argument("--level", type=int, help="zstd compression level")
 parser.add_argument("--dims", type=str, required=True, help="3D data dimensions, e.g. '512 512 512'")
 parser.add_argument("--input", required=True)
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
+parser.add_argument("--enable-calc_stats", action="store_true", help="Enable calcErrStats.py evaluation")
+parser.add_argument("--block-size", type=int, default=-1, help="Block size for calcErrStats.py, default is -1 (global stats)")
+parser.add_argument("--shift-size", type=int, help="Shift size for calcErrStats.py, required if block-size > 0")
+parser.add_argument("--output-prefix", type=str, help="Output prefix for calcErrStats.py, required if block-size > 0")
 parser.add_argument("--datatype", choices=["f", "d"], required=True, help="Data type (f for float, d for double)")
 parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
                     help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
@@ -30,7 +35,34 @@ decompressed_file = os.path.abspath("tmp_decompressed.sz.out")
 
 with open("configs/compressor_templates.yaml") as f:
     compressor_templates = yaml.safe_load(f)["compressors"]
+  
+def run_calc_err_stats(datatype, ori_file, dec_file, dims, block_size, shift_size=None, output_prefix=None):
+    # 构造 calcErrStats.py 命令
+    cmd = [
+        "python",
+        os.path.abspath("calcErrStats.py"),
+        "float" if datatype == "-f" else "double",
+        ori_file,
+        dec_file,
+        str(len(dims))
+    ] + [str(dim) for dim in dims]
 
+    # 全局统计
+    if block_size < 0:
+        cmd += [str(block_size)]
+    # 分块统计
+    else:
+        cmd += [str(block_size), str(shift_size), output_prefix]
+
+    print("[DEBUG] Running calcErrStats.py:", " ".join(cmd))
+
+    # 执行命令
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print("[ERROR] Failed to run calcErrStats.py")
+        print(e.stderr)
 if args.compressor == "sz3":
     results = []
     
@@ -74,6 +106,27 @@ if args.compressor == "sz3":
             args.input, 
             compressed_file
         )
+        
+        if args.enable_calc_stats:
+            # print("[DEBUG] Attempting to run calcErrStats.py")
+            # print(f"[DEBUG] cfg['datatype']: {cfg['datatype']}")
+            # print(f"[DEBUG] args.input: {args.input}")
+            # print(f"[DEBUG] decompressed_file: {decompressed_file}")
+            run_calc_err_stats(
+                datatype=cfg["datatype"],
+                ori_file=args.input,
+                dec_file=decompressed_file,
+                dims=[int(d) for d in args.dims.split()],
+                block_size=args.block_size,
+                shift_size=args.shift_size,
+                output_prefix=args.output_prefix
+            )
+        
+
+
+
+
+        
         
         # if not os.path.exists(decompressed_file):
         #     print(f"[ERROR] Decompression failed, missing output file: {decompressed_file}")
@@ -160,6 +213,18 @@ elif args.compressor == "qoz":
             args.input, 
             compressed_file
         )
+        
+        if args.enable_calc_stats:
+            run_calc_err_stats(
+                datatype=cfg["datatype"],
+                ori_file=args.input,
+                dec_file=decompressed_file,
+                dims=[int(d) for d in args.dims.split()],
+                block_size=args.block_size,
+                shift_size=args.shift_size,
+                output_prefix=args.output_prefix
+            )
+
         
         # if not os.path.exists(decompressed_file):
         #     print(f"[ERROR] Decompression failed, missing output file: {decompressed_file}")
