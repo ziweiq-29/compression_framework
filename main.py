@@ -53,7 +53,7 @@ def run_calc_err_stats(datatype, ori_file, dec_file, dims, block_size, shift_siz
     # 分块统计
     else:
         cmd += [str(block_size), str(shift_size), output_prefix]
-
+    # print("calc_stat_cmd is: ", cmd)
     print("[DEBUG] Running calcErrStats.py:", " ".join(cmd))
 
     # 执行命令
@@ -251,11 +251,15 @@ elif args.compressor == "sperr3d":
             compressed_file,
             parser = "sperr3d"
         )
-        
+        dtype_map = {
+            "32": "single precision",
+            "64": "double precision"
+        }
         # 如果启用了 calcErrStats
         if args.enable_calc_stats:
+            dtype="-f" if args.datatype == "f" else "-d"
             run_calc_err_stats(
-                datatype=cfg["datatype"],
+                datatype=dtype,
                 ori_file=args.input,
                 dec_file=decompressed_file,
                 dims=[int(d) for d in args.dims.split()],
@@ -264,10 +268,7 @@ elif args.compressor == "sperr3d":
                 output_prefix=args.output_prefix
             )
 
-        dtype_map = {
-            "32": "single precision",
-            "64": "double precision"
-        }
+
         
         result["input_file(B)"] = input_file_name
         result["data_type"] = dtype_map.get(cfg["datatype"])

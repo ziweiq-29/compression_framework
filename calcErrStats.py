@@ -27,7 +27,8 @@ if __name__ == "__main__":
             write_to_file = True 
             output_prefix = sys.argv[cur_argc]
             cur_argc += 1 
-
+    print("ori_data_path: ",ori_data_path)
+    print("dec_data_path: ",decomp_data_path)
     ori_data = np.fromfile(ori_data_path, dtype = datatype).reshape(dims)
     dec_data = np.fromfile(decomp_data_path, dtype = datatype).reshape(dims)
 
