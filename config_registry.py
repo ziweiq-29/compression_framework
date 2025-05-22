@@ -43,3 +43,35 @@ def get_QoZ_configs(args):
             "datatype": data_type  
         })
     return configs
+def get_sperr_configs(args):
+    configs = []
+    values = [args.value] if args.value else args.sweep
+    mode_map = {
+        "ABS": "--pwe",
+        "REL": "--vre",
+        "PSNR": "--psnr",
+        "NORM": "--bpp"
+    }
+    
+    # Map ftype from datatype
+    ftype_map = {
+        "f": "32",
+        "d": "64"
+    }
+    
+    for val in values:
+        name = f"sperr"
+        arg_flag = mode_map[args.mode]
+        data_type = ftype_map[args.datatype]
+        
+        configs.append({
+            "name": name,
+            "mode": args.mode,
+            "arg": f"{arg_flag} {val}",
+            "error_bound": val,
+            "ftype": data_type,
+            "datatype": ftype_map.get(args.datatype)
+        })
+        
+
+    return configs
