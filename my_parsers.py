@@ -30,3 +30,20 @@ def parse_sperr_output(output):
                 info["compression_ratio"] = float(ratio_str)
     return info
 
+
+def parse_zfp_output(output):
+    info = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("compression time: time ="):
+            info["compression_time"] = float(line.split("=")[-1].strip().rstrip("s"))
+        elif line.startswith("decompression time: time ="):
+            info["decompression_time"] = float(line.split("=")[-1].strip().rstrip("s"))
+        elif "ratio=" in line:
+            try:
+                parts = line.split("ratio=")[1]
+                ratio_str = parts.split()[0]
+                info["compression_ratio"] = float(ratio_str)
+            except:
+                pass  # skip parsing error silently
+    return info

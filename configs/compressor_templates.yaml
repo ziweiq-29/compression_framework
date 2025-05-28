@@ -12,6 +12,10 @@ compressors:
   sperr3d:
     compress_template: "/home/ziweiq2/SPERR/build/bin/sperr3d -c --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
 
+  zfp:
+    compress_template: "/home/ziweiq2/zfp-1.0.1/build/bin/zfp {datatype} -3 {dims} -i {input} -z {compressed} {mode} {arg} -o {decompressed} -s"
+
+
   qcat:
     evaluators:
         ssim: "/home/ziweiq2/compression_framework/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"

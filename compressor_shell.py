@@ -1,6 +1,6 @@
 import subprocess
-from my_parsers import parse_sz3_output, parse_sperr_output
-
+from my_parsers import parse_sz3_output, parse_sperr_output,parse_zfp_output
+import re
 
 def run_command(cmd,parser_func):
    
@@ -22,11 +22,16 @@ def run_command(cmd,parser_func):
         # if line.startswith("compression ratio"):
         #     info["compression_ratio"] = float(line.split("=")[-1].strip())
         if line.startswith("compression time"):
-            info["compression_time"] = float(line.split("=")[-1].strip())
+            match = re.search(r"([\d.]+)", line)
+            if match:
+                info["compression_time"] = float(match.group(1))
         elif line.startswith("compressed data file"):
             info["compressed_file"] = line.split("=")[-1].strip()
         elif line.startswith("decompression time"):
-            info["decompression_time"] = float(line.split("=")[-1].strip().split()[0])  # 去掉 "seconds"
+            # info["decompression_time"] = float(line.split("=")[-1].strip().split()[0])  # 去掉 "seconds"
+            match = re.search(r"([\d.]+)", line)
+            if match:
+                info["decompression_time"] = float(match.group(1))
         elif line.startswith("decompressed file"):
             info["decompressed_file"] = line.split("=")[-1].strip()
 

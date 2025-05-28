@@ -75,3 +75,35 @@ def get_sperr_configs(args):
         
 
     return configs
+
+
+
+def get_zfp_configs(args):
+    configs = []
+
+    values = [args.value] if args.value else args.sweep
+
+    # Map compression mode to zfp argument flags
+    mode_map = {
+        "ABS": "-a",         
+        "REL": "-v",        
+        "PSNR": "-p",        
+        "RATE": "-r",        
+        "LOSSLESS": "-R"    
+    }
+
+
+    values = [args.value] if args.value else args.sweep
+    for val in values:
+        name = f"zfp"
+        arg_flag = mode_map[args.mode]
+        data_type = f"-{args.datatype}"
+        configs.append({
+            "name": name,
+            "mode": mode_map[args.mode],
+            "arg": val,
+            "error_bound": val,
+            "datatype": data_type  
+        })
+    return configs
+
