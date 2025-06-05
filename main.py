@@ -9,12 +9,12 @@ from qcat_runner import run_evaluators
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--compressor", required=True, choices=["sz3", "qoz","sperr3d","zfp"])
+parser.add_argument("--compressor", required=True, choices=["sz3", "qoz","sperr3d","sperr2d","zfp"])
 parser.add_argument("--mode", choices=["ABS", "REL","PSNR","NORM","RATE","LOSELESS"])
 parser.add_argument("--value", type=str, help="Single error bound value")
 parser.add_argument("--sweep", nargs="*", help="Sweep a list of error bounds")
 parser.add_argument("--level", type=int, help="zstd compression level")
-parser.add_argument("--dims", type=str, required=True, help="3D data dimensions, e.g. '512 512 512'")
+parser.add_argument("--dims", type=str, required=True, help="e.g. '512 512 512'")
 parser.add_argument("--input", required=True)
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
 parser.add_argument("--enable-calc_stats", action="store_true", help="Enable calcErrStats.py evaluation")
@@ -66,7 +66,9 @@ def run_calc_err_stats(datatype, ori_file, dec_file, dims, block_size, shift_siz
 results = []
 if args.compressor == "sz3":
     
-    
+    dim_list = args.dims.strip().split()
+    dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
+    dims_values = " ".join(dim_list)  
     sz3_templates = compressor_templates["sz3"]
     for cfg in config_registry.get_sz3_configs(args):
         # print("[DEBUG] Compress cfg:", cfg)
@@ -76,7 +78,8 @@ if args.compressor == "sz3":
             input=args.input,
             compressed=compressed_file,
             decompressed=decompressed_file,
-            dims=args.dims,
+            dims=dims_flag,
+            dimsList=dims_values,
             mode=cfg["mode"],
             arg=cfg["arg"],
             datatype=cfg["datatype"]
@@ -117,7 +120,7 @@ if args.compressor == "sz3":
     "-d": "double precision"
 }
         
-        result["input_file(B)"] = input_file_name
+        result["input_file"] = input_file_name
         result["data_type"] = dtype_map.get(cfg["datatype"])
         result["compression_ratio"] = result_metrics["compression_ratio"]
         result["compress_time(s)"] = result_metrics["compress_time"]
@@ -152,6 +155,9 @@ if args.compressor == "sz3":
 elif args.compressor == "qoz":
    
     qoz_templates = compressor_templates["qoz"]
+    dim_list = args.dims.strip().split()
+    dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
+    dims_values = " ".join(dim_list)  
     for cfg in config_registry.get_QoZ_configs(args):
         compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.compressed")
         decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.qoz.out")
@@ -160,7 +166,8 @@ elif args.compressor == "qoz":
             input=args.input,
             compressed=compressed_file,
             decompressed=decompressed_file,
-            dims=args.dims,
+            dims=dims_flag,
+            dimsList=dims_values,
             mode=cfg["mode"],
             arg=cfg["arg"],
             datatype=cfg["datatype"]
@@ -241,7 +248,7 @@ elif args.compressor == "sperr3d":
         print(f"[DEBUG] Running compress: {compress_cmd}")
         
         result = {}
-        result["compressor name"] = "sperr"
+        result["compressor name"] = "sperr3d"
         result_metrics = run_pipeline(
             cfg["name"], 
             {
@@ -295,9 +302,95 @@ elif args.compressor == "sperr3d":
             result.update(qcat_results)
         results.append(result)
 
+
+elif args.compressor == "sperr2d":
+
+    configs = config_registry.get_sperr_configs(args)
+    print(f"[DEBUG] sperr config count: {len(configs)}")
+    sperr_templates = compressor_templates["sperr2d"]
+    for cfg in config_registry.get_sperr_configs(args):
+        compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.sperr")
+        decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.sperr.out")
+        
+        # 构造压缩和解压命令
+        compress_cmd = sperr_templates["compress_template"].format(
+            input=args.input,
+            decompressed=decompressed_file,
+            compressed=compressed_file,
+            dims=args.dims,
+            mode=cfg["mode"],
+            arg=cfg["arg"],
+            ftype=cfg["datatype"]
+        )
+        print(f"[DEBUG] Running compress: {compress_cmd}")
+        
+        result = {}
+        result["compressor name"] = "sperr2d"
+        result_metrics = run_pipeline(
+            cfg["name"], 
+            {
+                "compress_cmd": compress_cmd,
+            }, 
+            args.input, 
+            compressed_file,
+            parser = "sperr3d"
+        )
+        dtype_map = {
+            "32": "single precision",
+            "64": "double precision"
+        }
+        # 如果启用了 calcErrStats
+        if args.enable_calc_stats:
+            dtype="-f" if args.datatype == "f" else "-d"
+            run_calc_err_stats(
+                datatype=dtype,
+                ori_file=args.input,
+                dec_file=decompressed_file,
+                dims=[int(d) for d in args.dims.split()],
+                block_size=args.block_size,
+                shift_size=args.shift_size,
+                output_prefix=args.output_prefix
+            )
+
+
+        
+        result["input_file(B)"] = input_file_name
+        result["data_type"] = dtype_map.get(cfg["datatype"])
+        result["compression_ratio"] = result_metrics["compression_ratio"]
+        result["compress_time(s)"] = result_metrics["compress_time"]
+        result["mode"] = cfg["mode"]
+        result["error_bound"] = cfg["error_bound"]
+        result["decompress_time(s)"] = result_metrics["decompress_time"]
+        result["ori_size(B)"] = result_metrics["size_of_file"]
+        
+        # 如果启用了 qcat
+        if args.enable_qcat:
+            qcat_results = {}
+            qcat_templates = compressor_templates["qcat"]["evaluators"]
+            evaluator_keys = args.qcat_evaluators.split(",")
+            qcat_results = run_evaluators(
+                evaluator_templates=qcat_templates,
+                evaluator_keys=evaluator_keys,
+                datatype=args.datatype,
+                input=args.input,
+                decompressed=decompressed_file,
+                dims=args.dims
+            )
+            result.update(qcat_results)
+        results.append(result)
+
+
+
+
+
+
+
+
 elif args.compressor == "zfp":
     
-    
+    dim_list = args.dims.strip().split()
+    dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
+    dims_values = " ".join(dim_list)  
     sz3_templates = compressor_templates["zfp"]
     for cfg in config_registry.get_zfp_configs(args):
         # print("[DEBUG] Compress cfg:", cfg)
@@ -307,7 +400,8 @@ elif args.compressor == "zfp":
             input=args.input,
             compressed=compressed_file,
             decompressed=decompressed_file,
-            dims=args.dims,
+            dims=dims_flag,
+            dimsList=dims_values,
             mode=cfg["mode"],
             arg=cfg["arg"],
             datatype=cfg["datatype"]

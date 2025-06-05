@@ -98,7 +98,7 @@ for fname in files:
         os.rename("results.csv", output_csv)
         print(f"✅ Saved to {output_csv}")
         df = pd.read_csv(output_csv)   # ✅ 用新文件名来读！
-        df["input_file"] = fname
+        # df["input_file"] = fname
         all_results.append(df)
     else:
         print("⚠️ Warning: results.csv not found.")

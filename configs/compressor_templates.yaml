@@ -1,22 +1,28 @@
 compressors:
   sz3:
-    compress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 {datatype} -i {input} -z {compressed} -o {decompressed} -3 {dims} -M {mode} {arg} -a"
+    compress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 {datatype} -i {input} -z {compressed} -o {decompressed} {dims} {dimsList} -M {mode} {arg} -a"
     # decompress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 {datatype} -z {compressed} -i {input} -o {decompressed} -3 {dims} -M {mode} {error_bound} -a"
     # decompress_template: "/home/ziweiq2/SZ3/build/tools/sz3/sz3 {datatype} -i {input} -o {decompressed} -3 {dims} -M {mode} {error_bound} -a"
 
 
   qoz: 
-    compress_template: "/home/ziweiq2/HPEZ/build/bin/hpez {datatype} -i {input} -z {compressed} -o {decompressed} -3 {dims} -M {mode} {arg} -a"
+    compress_template: "/home/ziweiq2/HPEZ/build/bin/hpez {datatype} -i {input} -z {compressed} -o {decompressed} {dims} {dimsList} -M {mode} {arg} -a"
     # decompress_template: "/home/ziweiq2/HPEZ/build/bin/hpez {datatype} -i -z {compressed} -i {input} -o {decompressed} -3 {dims} -M {mode} {error_bound} -a"
   
   sperr3d:
     compress_template: "/home/ziweiq2/SPERR/build/bin/sperr3d -c --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
 
+  sperr2d:
+    compress_template: "/home/ziweiq2/SPERR/build/bin/sperr2d -c --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
+
   zfp:
-    compress_template: "/home/ziweiq2/zfp-1.0.1/build/bin/zfp {datatype} -3 {dims} -i {input} -z {compressed} {mode} {arg} -o {decompressed} -s"
+    compress_template: "/home/ziweiq2/zfp-1.0.1/build/bin/zfp {datatype} {dims} {dimsList} -i {input} -z {compressed} {mode} {arg} -o {decompressed} -s"
 
 
   qcat:
     evaluators:
-        ssim: "/home/ziweiq2/compression_framework/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"
-        compareData: "/home/ziweiq2/compression_framework/bin/compareData {datatype} {input} {decompressed}"
+        # ssim: "/home/ziweiq2/compression_framework/build/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"
+        # compareData: "/home/ziweiq2/compression_framework/build/bin/compareData {datatype} {input} {decompressed}"
+        ssim: "/home/ziweiq2/compression_framework/qcat/build/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"
+        compareData: "/home/ziweiq2/compression_framework/qcat/build/bin/compareData {datatype} {input} {decompressed}"
+

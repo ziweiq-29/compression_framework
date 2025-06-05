@@ -21,15 +21,22 @@ def run_evaluators(evaluator_templates, evaluator_keys, datatype, input, decompr
             output = (completed.stdout or "") + "\n" + (completed.stderr or "")
             print(f"[QCAT] Output:\n{output}")
             if key == 'ssim':
-                for line in output.splitlines():
-                    line = line.strip()
-                    if "ssim" in line.lower() and "=" in line:
-                        try:
-                            _, val = line.split("=")
-                            results[f"qcat_{key}"] = float(val.strip())
-                            print(f"[QCAT] Parsed {key}: {results[f'qcat_{key}']}")
-                        except ValueError:
-                            print(f"[QCAT] Warning: could not parse line: {line}")
+                    for line in output.splitlines():
+                        line = line.strip()
+                        if "local_ssim" in line.lower() and "=" in line:
+                            try:
+                                _, val = line.split("=")
+                                results["qcat_local_ssim"] = float(val.strip())
+                                print(f"[QCAT] Parsed local_ssim: {results['qcat_local_ssim']}")
+                            except ValueError:
+                                print(f"[QCAT] Warning: could not parse line: {line}")
+                        elif "global_ssim" in line.lower() and "=" in line:
+                            try:
+                                _, val = line.split("=")
+                                results["qcat_global_ssim"] = float(val.strip())
+                                print(f"[QCAT] Parsed global_ssim: {results['qcat_global_ssim']}")
+                            except ValueError:
+                                print(f"[QCAT] Warning: could not parse line: {line}")
             elif key == 'compareData': 
                 for line in output.splitlines():
                     line = line.strip()
