@@ -37,6 +37,21 @@ def run_evaluators(evaluator_templates, evaluator_keys, datatype, input, decompr
                                 print(f"[QCAT] Parsed global_ssim: {results['qcat_global_ssim']}")
                             except ValueError:
                                 print(f"[QCAT] Warning: could not parse line: {line}")
+                                
+            elif key == 'computeErrAutoCorrelation':
+                for line in output.splitlines():
+                    line = line.strip()
+                    if line.startswith("Lag-") and "auto correlation:" in line:
+                        try:
+                            prefix, value = line.rsplit(":", 1)  # ← 使用 rsplit 更安全
+                            lag_part = prefix.strip().split()[0]  # e.g. "Lag-1"
+                            lag = int(lag_part.split("-")[1])     # 拿到 1
+                            val = float(value.strip())            # 转换 value
+                            results[f"autocorr_lag_{lag}"] = val
+                        except Exception as e:
+                            print(f"[QCAT] Parse error for line: {line} ({e})")
+
+
             elif key == 'compareData': 
                 for line in output.splitlines():
                     line = line.strip()

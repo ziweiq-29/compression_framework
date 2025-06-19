@@ -25,4 +25,5 @@ compressors:
         # compareData: "/home/ziweiq2/compression_framework/build/bin/compareData {datatype} {input} {decompressed}"
         ssim: "/home/ziweiq2/compression_framework/qcat/build/bin/calculateSSIM {datatype} {input} {decompressed} {dims}"
         compareData: "/home/ziweiq2/compression_framework/qcat/build/bin/compareData {datatype} {input} {decompressed}"
+        computeErrAutoCorrelation: "/home/ziweiq2/compression_framework/qcat/build/bin/computeErrAutoCorrelation {datatype} {input} {decompressed}"
 
