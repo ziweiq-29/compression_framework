@@ -17,6 +17,13 @@ compressors:
 
   zfp:
     compress_template: "/home/ziweiq2/zfp-1.0.1/build/bin/zfp {datatype} {dims} {dimsList} -i {input} -z {compressed} {mode} {arg} -o {decompressed} -s"
+  
+
+  tthresh:
+    compress_template: "/home/ziweiq2/tthresh/build/tthresh -i {input} -t {datatype} -s {dimsList} {mode} {arg} -c {compressed} -o {decompressed}"
+
+  faz:
+    compress_template: "/home/ziweiq2/FAZ/install/bin/faz {datatype} -i {input} -z {compressed} -o {decompressed} {dims} {dimsList} -M {mode} {arg} -a"
 
 
   qcat:

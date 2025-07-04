@@ -107,3 +107,59 @@ def get_zfp_configs(args):
         })
     return configs
 
+
+
+
+
+
+def get_tthresh_configs(args):
+    configs = []
+
+    values = [args.value] if args.value else args.sweep
+
+    # Map compression mode to zfp argument flags
+    mode_map = {
+        "ABS": "-e",         
+        "REL": "-r",        
+        "PSNR": "-p"       
+   
+    }
+    dtype_map = {
+        "f": "float",
+        "d": "double",
+        "i": "int",
+        "uc": "uchar",
+        "us": "ushort"
+    }
+    data_type = dtype_map[args.datatype]
+    values = [args.value] if args.value else args.sweep
+    for val in values:
+        name = f"tthresh"
+
+        configs.append({
+            "name": name,
+            "mode": mode_map[args.mode],
+            "arg": val,
+            "error_bound": val,
+            "datatype": data_type
+        })
+    return configs
+
+
+def get_faz_configs(args):
+    configs = []
+    values = [args.value] if args.value else args.sweep
+    for val in values:
+        name = f"faz"
+        arg_flag = mode_to_flag[args.mode]
+        data_type = f"-{args.datatype}"
+        # readable_dtype = dtype_map.get(data_type)
+            # data_type = args.datatype
+        configs.append({
+            "name": name,
+            "mode": args.mode,
+            "arg": f"{arg_flag} {val}",
+            "error_bound": val,
+            "datatype": data_type
+        })
+    return configs
