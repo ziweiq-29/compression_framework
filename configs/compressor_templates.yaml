@@ -25,6 +25,11 @@ compressors:
   faz:
     compress_template: "/home/ziweiq2/FAZ/install/bin/faz {datatype} -i {input} -z {compressed} -o {decompressed} {dims} {dimsList} -M {mode} {arg} -a"
 
+  mgard:
+    compress_template: "/home/ziweiq2/MGARD/build/bin/mgard-x -z -i {input} -o {compressed} -dt {datatype} -dim {dims} {dimsList} -em {mode} -e {arg} -s inf -l {lossless} -d serial -v {verbose} && /home/ziweiq2/MGARD/build/bin/mgard-x -x -i {compressed} -o {decompressed} -d serial -v {verbose}"
+
+
+
 
   qcat:
     evaluators:

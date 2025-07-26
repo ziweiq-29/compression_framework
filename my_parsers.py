@@ -69,9 +69,9 @@ def parse_faz_output(output):
     info = {}
     for line in output.splitlines():
         line = line.strip()
-        if line.startswith("compression ratio"):
-            info["compression_ratio"] = float(line.split("=")[-1].strip())
-        elif line.startswith("compression time"):
+        # if line.startswith("compression ratio"):
+        #     info["compression_ratio"] = float(line.split("=")[-1].strip())
+        if line.startswith("compression time"):
             info["compression_time"] = float(line.split("=")[-1].strip())
         elif line.startswith("compressed data file"):
             info["compressed_file"] = line.split("=")[-1].strip()
@@ -79,4 +79,28 @@ def parse_faz_output(output):
             info["decompression_time"] = float(line.split("=")[-1].strip().split()[0])
         elif line.startswith("decompressed file"):
             info["decompressed_file"] = line.split("=")[-1].strip()
+    return info
+
+
+def parse_mgard_output(output):
+    print("[DEBUG] MGARD raw output to parse:")
+    print(output)
+    info = {}
+    lines = output.splitlines()
+
+    for line in lines:
+        line = line.strip()
+        # print("?[DE?BUG] Checking line:", line)
+
+        if "High-level compression time" in line:
+            time_str = line.split(":")[1].split("s")[0].strip()
+            info["compression_time"] = float(time_str)
+            # print("[DEBUG] Found huffman_compress_time:", time_str)
+
+        elif "High-level decompression time" in line:
+            time_str = line.split(":")[1].split("s")[0].strip()
+            info["decompression_time"] = float(time_str)
+            # print("[DEBUG] Found huffman_decompress_time:", time_str)
+
+    # print("[DEBUG] Parsed mgard info:", info)
     return info

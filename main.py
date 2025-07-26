@@ -9,7 +9,7 @@ from qcat_runner import run_evaluators
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--compressor", required=True, choices=["sz3", "qoz","sperr3d","sperr2d","zfp","tthresh","faz"])
+parser.add_argument("--compressor", required=True, choices=["sz3", "qoz","sperr3d","sperr2d","zfp","tthresh","faz","mgard"])
 parser.add_argument("--mode",type=str, choices=["ABS", "REL","PSNR","NORM","RATE","LOSELESS"])
 parser.add_argument("--value", type=str, help="Single error bound value")
 parser.add_argument("--sweep", nargs="*", help="Sweep a list of error bounds")
@@ -22,8 +22,13 @@ parser.add_argument("--block-size", type=int, default=-1, help="Block size for c
 parser.add_argument("--shift-size", type=int, help="Shift size for calcErrStats.py, required if block-size > 0")
 parser.add_argument("--output-prefix", type=str, help="Output prefix for calcErrStats.py, required if block-size > 0")
 parser.add_argument("--datatype", choices=["f", "d"], required=True, help="Data type (f for float, d for double)")
+parser.add_argument('--smooth', type=int, default=0, help='Smooth parameter (only used for MGARD)')
 parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
                     help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
+parser.add_argument("--lossless", type=str, default="huffman-zstd", choices=["huffman", "huffman-lz4", "huffman-zstd"], help="MGARD lossless backend")
+parser.add_argument("--verbose", type=str, default="2", choices=["0", "1", "2", "3"], help="MGARD verbose level")
+
+
 args = parser.parse_args()
 
 compressed_file = "tmp_compressed"
@@ -64,12 +69,13 @@ def run_calc_err_stats(datatype, ori_file, dec_file, dims, block_size, shift_siz
         print("[ERROR] Failed to run calcErrStats.py")
         print(e.stderr)
 results = []
+name=""
 
 
 
 
 if args.compressor == "sz3":
-    
+    name = "sz3"
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
     dims_values = " ".join(dim_list)  
@@ -157,7 +163,7 @@ if args.compressor == "sz3":
         
         
 elif args.compressor == "qoz":
-   
+    name = "qoz"
     qoz_templates = compressor_templates["qoz"]
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
@@ -180,6 +186,7 @@ elif args.compressor == "qoz":
         result={}
         result["compressor name"] = "qoz"
         result_metrics = {}
+
         
         result_metrics = run_pipeline(
             cfg["name"], 
@@ -231,7 +238,7 @@ elif args.compressor == "qoz":
         results.append(result)
     
 elif args.compressor == "sperr3d":
-
+    name = "sperr3d"
     configs = config_registry.get_sperr_configs(args)
     print(f"[DEBUG] sperr config count: {len(configs)}")
     sperr_templates = compressor_templates["sperr3d"]
@@ -254,7 +261,8 @@ elif args.compressor == "sperr3d":
         result = {}
         result["compressor name"] = "sperr3d"
         result_metrics = run_pipeline(
-            cfg["name"], 
+            # cfg["name"], 
+            name,
             {
                 "compress_cmd": compress_cmd,
             }, 
@@ -308,7 +316,7 @@ elif args.compressor == "sperr3d":
 
 
 elif args.compressor == "sperr2d":
-
+    name = "sperr2d"
     configs = config_registry.get_sperr_configs(args)
     print(f"[DEBUG] sperr config count: {len(configs)}")
     sperr_templates = compressor_templates["sperr2d"]
@@ -391,7 +399,7 @@ elif args.compressor == "sperr2d":
 
 
 elif args.compressor == "zfp":
-    
+    name = "zfp"
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
     dims_values = " ".join(dim_list)  
@@ -475,6 +483,7 @@ elif args.compressor == "zfp":
 
 
 elif args.compressor == "tthresh":
+    name = "tthresh"
     dim_list = args.dims.strip().split()
     dims_values = " ".join(dim_list)
     templates = compressor_templates["tthresh"]
@@ -553,13 +562,13 @@ elif args.compressor == "tthresh":
         
         
         results.append(result)
-if args.compressor == "faz":
-    
+elif args.compressor == "faz":
+    name = "faz"
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
     dims_values = " ".join(dim_list)  
     sz3_templates = compressor_templates["faz"]
-    for cfg in config_registry.get_sz3_configs(args):
+    for cfg in config_registry.get_faz_configs(args):
         # print("[DEBUG] Compress cfg:", cfg)
         compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.compressed")
         decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.sz.out")
@@ -634,9 +643,93 @@ if args.compressor == "faz":
             print(f"[DEBUG] qcat_results: {qcat_results}")
             result.update(qcat_results)
         results.append(result)   
+elif args.compressor == "mgard":
+    name = "mgard"
+    dim_list = args.dims.strip().split()
+    dims_flag = f"{len(dim_list)}"            
+    dims_values = " ".join(dim_list) 
 
+    mgard_templates = compressor_templates["mgard"]
 
+    for cfg in config_registry.get_mgard_configs(args):
+        compressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.compressed")
+        decompressed_file = os.path.abspath(f"tmp_{cfg['error_bound']}.mgard.out")
 
+        compress_cmd = mgard_templates["compress_template"].format(
+            input=args.input,
+            compressed=compressed_file,
+            decompressed=decompressed_file,
+            dims=dims_flag,
+            dimsList=dims_values,
+            mode=cfg["mode"],
+            arg=cfg["arg"],
+            datatype=cfg["datatype"],
+            smooth=cfg["smooth"],
+            lossless=cfg["lossless"],
+            verbose=cfg["verbose"]
+        )
+
+        print(f"[DEBUG] Running compress + decompress: {compress_cmd}")
+
+        result = {}
+        result_metrics = {}
+
+        result_metrics = run_pipeline(
+            cfg["name"],
+            {
+                "compress_cmd": compress_cmd,
+            },
+            args.input,
+            compressed_file,
+            parser="mgard"
+        )
+
+        if args.enable_calc_stats:
+            run_calc_err_stats(
+                datatype="-f" if cfg["datatype"] == "s" else "-d", 
+                # datatype=cfg["datatype"],
+                # "float" if datatype == "s" else "double",
+                ori_file=args.input,
+                dec_file=decompressed_file,
+                dims=[int(d) for d in args.dims.strip().split()],
+                block_size=args.block_size,
+                shift_size=args.shift_size,
+                output_prefix=args.output_prefix
+            )
+
+        dtype_map = {
+            "s": "single precision",
+            "d": "double precision"
+        }
+
+        input_file_name = os.path.basename(args.input)
+        print("result metrics is: ", result_metrics)
+        result["compressor name"] = "mgard"
+        result["input_file"] = input_file_name
+        result["data_type"] = dtype_map.get(cfg["datatype"])
+        result["compression_ratio"] = result_metrics["compression_ratio"]
+        result["compress_time(s)"] = result_metrics["compress_time"]
+        result["mode"] = cfg["mode"]
+        result["error_bound"] = cfg["error_bound"]
+        result["decompress_time(s)"] = result_metrics["decompress_time"]
+        result["ori_size(B)"] = result_metrics["size_of_file"]
+
+        if args.enable_qcat:
+            qcat_results = {}
+            qcat_templates = compressor_templates["qcat"]["evaluators"]
+            evaluator_keys = args.qcat_evaluators.split(",")
+            qcat_results = run_evaluators(
+                evaluator_templates=qcat_templates,
+                evaluator_keys=evaluator_keys,
+                datatype=args.datatype,
+                input=args.input,
+                decompressed=decompressed_file,
+                dims=args.dims
+            )
+            print(f"[DEBUG] qcat_results: {qcat_results}")
+            result.update(qcat_results)
+
+        results.append(result)
 
 
 
@@ -645,5 +738,9 @@ if args.compressor == "faz":
 df = pd.DataFrame(results)
 print("\n Compression Results:")
 print(df)
-df.to_csv("results.csv", index=False)
+output_dir = "outputs"
+os.makedirs(output_dir, exist_ok=True)  # 如果文件夹不存在就创建
+
+df.to_csv(os.path.join(output_dir, name + "_results.csv"), index=False)
+df.to_csv(name+"_results.csv", index=False)
 

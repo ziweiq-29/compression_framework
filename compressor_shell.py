@@ -6,7 +6,7 @@ def run_command(cmd,parser_func):
    
     try:
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
-        output = result.stdout
+        output = result.stdout+result.stderr
     except subprocess.CalledProcessError as e:
         print("[ERROR] Compression command failed.")
         print(f"[ERROR] Exit code: {e.returncode}")
@@ -17,6 +17,8 @@ def run_command(cmd,parser_func):
         print(e.stderr)
         raise  # 保留异常抛出，调用者可以决定怎么处理
     info = parser_func(output)
+    print("[DEBUG] Parsed info from parser_func:")
+    print(info)
     for line in output.splitlines():
         line = line.strip()
         # if line.startswith("compression ratio"):
@@ -41,5 +43,6 @@ def run_command(cmd,parser_func):
     # if missing_keys:
     #     print(output)
     #     raise ValueError(f"Missing required information: {', '.join(missing_keys)}")
-
+    print("[DEBUG] Final info dictionary:")
+    print(info)
     return info

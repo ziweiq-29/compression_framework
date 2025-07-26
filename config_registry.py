@@ -32,7 +32,7 @@ def get_QoZ_configs(args):
     configs = []
     values = [args.value] if args.value else args.sweep
     for val in values:
-        name = f"QoZ"
+        name = f"qoz"
         arg_flag = mode_to_flag[args.mode]
         data_type = f"-{args.datatype}"
         configs.append({
@@ -162,4 +162,52 @@ def get_faz_configs(args):
             "error_bound": val,
             "datatype": data_type
         })
+    return configs
+
+
+
+
+def get_faz_configs(args):
+    configs = []
+    values = [args.value] if args.value else args.sweep
+    for val in values:
+        name = f"faz"
+        arg_flag = mode_to_flag[args.mode]
+        data_type = f"-{args.datatype}"
+        # readable_dtype = dtype_map.get(data_type)
+            # data_type = args.datatype
+        configs.append({
+            "name": name,
+            "mode": args.mode,
+            "arg": f"{arg_flag} {val}",
+            "error_bound": val,
+            "datatype": data_type
+        })
+    return configs
+
+def get_mgard_configs(args):
+    configs = []
+    values = [args.value] if args.value else args.sweep
+    # dim_list = args.dims.split()
+    # num_dims = len(dims_list)
+    # dimsList = " ".join(dim_list)
+
+    for val in values:
+        name = "mgard"
+        # arg_flag = mode_to_flag[args.mode]  
+        data_type = "s" if args.datatype == "f" else "d"
+
+  
+        configs.append({
+            "name": name,
+            "mode": args.mode.lower(),               
+            "arg": f"{val}",                
+            "error_bound": val,
+            "datatype": data_type,          
+            "smooth": args.smooth,
+            "lossless": args.lossless,
+            "verbose": args.verbose
+            
+        })
+
     return configs

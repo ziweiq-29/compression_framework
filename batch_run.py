@@ -11,7 +11,7 @@ group.add_argument("--value", help="Single error bound")
 
 parser.add_argument("--dataset_dir", required=True, help="Directory containing .f32 files")
 parser.add_argument("--dims", required=True, help="Data dimensions, e.g. '512 512 512'")
-parser.add_argument("--compressor", default="qoz", help="Compressor name")
+parser.add_argument("--compressor", default="sz3", help="Compressor name")
 parser.add_argument("--mode", default="REL", help="Compression mode (ABS, REL, etc.)")
 parser.add_argument("--results_dir", default="results", help="Directory to save result CSVs")
 parser.add_argument("--enable-qcat", action="store_true", help="Enable qcat evaluation")
