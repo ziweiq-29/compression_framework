@@ -6,6 +6,7 @@ import config_registry
 import os
 import subprocess
 from qcat_runner import run_evaluators
+import csv
 
 
 parser = argparse.ArgumentParser()
@@ -75,6 +76,18 @@ name=""
 
 
 if args.compressor == "sz3":
+    output_root = "outputs"
+    input_path = args.input  # e.g. dataset/NYX/baryon_density.f32
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      # NYX
+    input_base, ext = os.path.splitext(os.path.basename(input_path))  # ("baryon_density", ".f32")
+
+ 
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
     name = "sz3"
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
@@ -155,6 +168,24 @@ if args.compressor == "sz3":
             print(f"[DEBUG] qcat_results: {qcat_results}")
             result.update(qcat_results)
         results.append(result)   
+    
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
+
 
         
         
@@ -163,6 +194,19 @@ if args.compressor == "sz3":
         
         
 elif args.compressor == "qoz":
+    
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
     name = "qoz"
     qoz_templates = compressor_templates["qoz"]
     dim_list = args.dims.strip().split()
@@ -236,8 +280,39 @@ elif args.compressor == "qoz":
             )
             result.update(qcat_results)
         results.append(result)
+
+    
+    
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
     
 elif args.compressor == "sperr3d":
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
     name = "sperr3d"
     configs = config_registry.get_sperr_configs(args)
     print(f"[DEBUG] sperr config count: {len(configs)}")
@@ -314,8 +389,38 @@ elif args.compressor == "sperr3d":
             result.update(qcat_results)
         results.append(result)
 
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+    
+            results = list(results)
+
+        
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
+        
+
 
 elif args.compressor == "sperr2d":
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
     name = "sperr2d"
     configs = config_registry.get_sperr_configs(args)
     print(f"[DEBUG] sperr config count: {len(configs)}")
@@ -390,6 +495,24 @@ elif args.compressor == "sperr2d":
             )
             result.update(qcat_results)
         results.append(result)
+        
+        
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
 
 
 
@@ -399,6 +522,18 @@ elif args.compressor == "sperr2d":
 
 
 elif args.compressor == "zfp":
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
     name = "zfp"
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
@@ -480,9 +615,40 @@ elif args.compressor == "zfp":
             print(f"[DEBUG] qcat_results: {qcat_results}")
             result.update(qcat_results)
         results.append(result)   
+        
+        
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
 
 
 elif args.compressor == "tthresh":
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
     name = "tthresh"
     dim_list = args.dims.strip().split()
     dims_values = " ".join(dim_list)
@@ -562,7 +728,41 @@ elif args.compressor == "tthresh":
         
         
         results.append(result)
+        
+        
+        
+        
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
+        
 elif args.compressor == "faz":
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
     name = "faz"
     dim_list = args.dims.strip().split()
     dims_flag = f"-{len(dim_list)}"            # 例如：-2, -3
@@ -643,7 +843,41 @@ elif args.compressor == "faz":
             print(f"[DEBUG] qcat_results: {qcat_results}")
             result.update(qcat_results)
         results.append(result)   
+        
+        
+        
+        
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
 elif args.compressor == "mgard":
+    output_root = "outputs"
+    input_path = args.input  
+
+    dataset_name = os.path.basename(os.path.dirname(input_path))      
+    input_base, ext = os.path.splitext(os.path.basename(input_path)) 
+
+   
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+
+    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    
     name = "mgard"
     dim_list = args.dims.strip().split()
     dims_flag = f"{len(dim_list)}"            
@@ -730,6 +964,24 @@ elif args.compressor == "mgard":
             result.update(qcat_results)
 
         results.append(result)
+        
+        
+    
+        if results:
+            results_csv_path = os.path.join(output_dir, name+"_results.csv")
+            # 如果 results 可能是生成器，先固化成列表
+            results = list(results)
+
+            # 动态列名
+            all_keys = sorted({k for r in results for k in r.keys()})
+            with open(results_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"[INFO] Results written to: {results_csv_path}")
+        else:
+            print("[WARN] No results to write.")
 
 
 

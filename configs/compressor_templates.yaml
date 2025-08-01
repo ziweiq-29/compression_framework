@@ -10,7 +10,7 @@ compressors:
     # decompress_template: "/home/ziweiq2/HPEZ/build/bin/hpez {datatype} -i -z {compressed} -i {input} -o {decompressed} -3 {dims} -M {mode} {error_bound} -a"
   
   sperr3d:
-    compress_template: "/home/ziweiq2/SPERR/build/bin/sperr3d -c --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
+    compress_template: "/home/ziweiq2/SPERR/build/bin/sperr3d -c --omp 0 --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
 
   sperr2d:
     compress_template: "/home/ziweiq2/SPERR/build/bin/sperr2d -c --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
@@ -26,7 +26,7 @@ compressors:
     compress_template: "/home/ziweiq2/FAZ/install/bin/faz {datatype} -i {input} -z {compressed} -o {decompressed} {dims} {dimsList} -M {mode} {arg} -a"
 
   mgard:
-    compress_template: "/home/ziweiq2/MGARD/build/bin/mgard-x -z -i {input} -o {compressed} -dt {datatype} -dim {dims} {dimsList} -em {mode} -e {arg} -s inf -l {lossless} -d serial -v {verbose} && /home/ziweiq2/MGARD/build/bin/mgard-x -x -i {compressed} -o {decompressed} -d serial -v {verbose}"
+    compress_template: "/home/ziweiq2/MGARD/build/bin/mgard-x -z -i {input} -o {compressed} -dt {datatype} -dim {dims} {dimsList} -em {mode} -e {arg} -s {smooth} -l {lossless} -d serial -v {verbose} && /home/ziweiq2/MGARD/build/bin/mgard-x -x -i {compressed} -o {decompressed} -d serial -v {verbose}"
 
 
 
