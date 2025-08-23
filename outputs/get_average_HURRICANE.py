@@ -6,13 +6,16 @@ from matplotlib.ticker import MultipleLocator, FormatStrFormatter, ScalarFormatt
 from matplotlib.ticker import LogLocator, LogFormatter
 plt.rcParams['xtick.labelsize'] = 22
 plt.rcParams['ytick.labelsize'] = 22
-plt.rcParams['axes.labelsize']  = 22
+plt.rcParams['axes.labelsize']  = 18
 
 # 根目录
 root_dir = "100x500x500"
+# metrics = [
+#     "psnr", "qcat_local_ssim", "qcat_global_ssim", "pearson",
+#     "compress_speed(MB/s)", "decompress_speed(MB/s)", "autocorr_lag_1"
+# ]
 metrics = [
-    "psnr", "qcat_local_ssim", "qcat_global_ssim", "pearson",
-    "compress_speed(MB/s)", "decompress_speed(MB/s)", "autocorr_lag_1"
+    "compress_speed(MB/s)", "decompress_speed(MB/s)"
 ]
 
 all_rows = []
@@ -50,6 +53,9 @@ metric_map = {
 
 # 读取所有结果
 for dirpath, dirnames, filenames in os.walk(root_dir):
+    if "log10" in dirpath:
+        print(f"[SKIP] Skipping {dirpath} because it contains 'log10'")
+        continue
     for file in filenames:
         if not file.endswith("_results.csv"):
             continue
@@ -192,7 +198,7 @@ for metric in metrics:
     plt.savefig(os.path.join(save_dir, f"{metric.replace('/', '_')}.pdf"), dpi=200, bbox_inches='tight')
     plt.close()
 
-
+#combined
 # import pandas as pd
 # import os
 # from pathlib import Path
@@ -254,9 +260,13 @@ for metric in metrics:
 
 # # 读取所有结果
 # for dirpath, dirnames, filenames in os.walk(root_dir):
+#     if "log10" in dirpath:
+#         print(f"[SKIP] Skipping directory: {dirpath}")
+#         continue
 #     for file in filenames:
 #         if not file.endswith("_results.csv"):
 #             continue
+
 #         compressor = file.replace("_results.csv", "")
 #         filepath = os.path.join(dirpath, file)
 
@@ -361,14 +371,14 @@ for metric in metrics:
 #         ax.set_ylim(0.6, 0.9)
 #     elif metric == "qcat_global_ssim":
 #         # ax.set_yscale("log")  
-#         ax.yaxis.set_major_locator(MultipleLocator(0.005))
+#         ax.yaxis.set_major_locator(MultipleLocator(0.001))
 #         formatter = ScalarFormatter(useMathText=False)
 #         formatter.set_scientific(False)
 #         formatter.set_useOffset(False)
 #         ax.yaxis.set_major_formatter(formatter)
 
-#         ax.set_xlim(0, 0.8)
-#         ax.set_ylim(0.99, 1)
+#         ax.set_xlim(0, 0.5)
+#         ax.set_ylim(0.995, 1)
 
 #     elif metric == "psnr":
 #         ax.set_yscale("linear") 
@@ -378,9 +388,9 @@ for metric in metrics:
 
 #     elif metric == "pearson":
 #         ax.set_yscale("linear")  
-#         ax.yaxis.set_major_locator(MultipleLocator(0.01))
-#         ax.set_xlim(0, 0.8)
-#         ax.set_ylim(0.95, 1)
+#         ax.yaxis.set_major_locator(MultipleLocator(0.005))
+#         ax.set_xlim(0, 0.5)
+#         ax.set_ylim(0.99, 1)
     
 #     elif metric == "compress_speed(MB/s)" or metric == "decompress_speed(MB/s)":
 #         ax.set_yscale("log")  

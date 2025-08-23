@@ -7,15 +7,17 @@ from matplotlib.ticker import LogLocator, LogFormatter
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 plt.rcParams['xtick.labelsize'] = 22
 plt.rcParams['ytick.labelsize'] = 22
-plt.rcParams['axes.labelsize']  = 22
+plt.rcParams['axes.labelsize']  = 18
 
 # 根目录
 root_dir = "NYX"
+# metrics = [
+#     "psnr", "qcat_local_ssim", "qcat_global_ssim", "pearson",
+#     "compress_speed(MB/s)", "decompress_speed(MB/s)", "autocorr_lag_1"
+# ]
 metrics = [
-    "psnr", "qcat_local_ssim", "qcat_global_ssim", "pearson",
-    "compress_speed(MB/s)", "decompress_speed(MB/s)", "autocorr_lag_1"
+    "compress_speed(MB/s)", "decompress_speed(MB/s)"
 ]
-
 all_rows = []
 
 color_map = {
@@ -51,9 +53,13 @@ metric_map = {
 
 # 读取所有结果
 for dirpath, dirnames, filenames in os.walk(root_dir):
+    if "log10" in dirpath:
+        print(f"[SKIP] Skipping {dirpath} because it contains 'log10'")
+        continue
     for file in filenames:
         if not file.endswith("_results.csv"):
             continue
+
         compressor = file.replace("_results.csv", "")
         filepath = os.path.join(dirpath, file)
 
@@ -205,7 +211,7 @@ for metric in metrics:
     plt.savefig(os.path.join(save_dir, f"{metric.replace('/', '_')}.pdf"), dpi=200, bbox_inches='tight')
     plt.close()
 
-
+#combined
 # import pandas as pd
 # import os
 # from pathlib import Path
@@ -267,9 +273,13 @@ for metric in metrics:
 
 # # 读取所有结果
 # for dirpath, dirnames, filenames in os.walk(root_dir):
+#     if "log10" in dirpath:
+#         print(f"[SKIP] Skipping directory: {dirpath}")
+#         continue
 #     for file in filenames:
 #         if not file.endswith("_results.csv"):
 #             continue
+
 #         compressor = file.replace("_results.csv", "")
 #         filepath = os.path.join(dirpath, file)
 
@@ -373,8 +383,8 @@ for metric in metrics:
 #         ax.set_xlim(0, 6)
 #         ax.set_ylim(0.6, 1.01)
 #     elif metric == "qcat_global_ssim":
-#         ax.set_xlim(0, 0.6)
-#         ax.set_ylim(0.985, 1)
+#         ax.set_xlim(0, 0.05)
+#         ax.set_ylim(0.995, 1)
 #         ax.set_ylabel("Global SSIM")
 
         
@@ -382,7 +392,7 @@ for metric in metrics:
 #         def plain_formatter(x, pos):
 #             return f"{x:.3f}"  # 保留四位小数
 
-#         ax.yaxis.set_major_locator(MultipleLocator(0.01))
+#         ax.yaxis.set_major_locator(MultipleLocator(0.001))
 #         ax.yaxis.set_major_formatter(FuncFormatter(plain_formatter))
 #     elif metric == "psnr":
 #         ax.set_yscale("linear") 
@@ -393,7 +403,7 @@ for metric in metrics:
 #     elif metric == "pearson":
 #         ax.set_yscale("linear")  
 #         ax.yaxis.set_major_locator(MultipleLocator(0.005))
-#         ax.set_xlim(0,5)
+#         ax.set_xlim(0,2)
 #         ax.set_ylim(0.98, 1.001)
     
 #     elif metric == "compress_speed(MB/s)" or metric == "decompress_speed(MB/s)":

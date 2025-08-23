@@ -7,7 +7,7 @@ from matplotlib.ticker import LogLocator, LogFormatter
 from matplotlib.ticker import FuncFormatter
 plt.rcParams['xtick.labelsize'] = 22
 plt.rcParams['ytick.labelsize'] = 22
-plt.rcParams['axes.labelsize']  = 22
+plt.rcParams['axes.labelsize']  = 18
 
 # 根目录
 root_dir = "CESM"

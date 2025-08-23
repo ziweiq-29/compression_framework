@@ -6,7 +6,7 @@ from matplotlib.ticker import MultipleLocator, FormatStrFormatter, ScalarFormatt
 from matplotlib.ticker import LogLocator, LogFormatter
 plt.rcParams['xtick.labelsize'] = 22
 plt.rcParams['ytick.labelsize'] = 22
-plt.rcParams['axes.labelsize']  = 22
+plt.rcParams['axes.labelsize']  = 18
 
 # 根目录
 root_dir = "288x115x69x69"

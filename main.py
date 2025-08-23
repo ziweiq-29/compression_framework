@@ -91,7 +91,7 @@ name=""
 
 
 
-def append_result_to_csv(results):
+def append_result_to_csv(results,overwrite=False):
     if results:
         merge_key = "error_bound"
         results_csv_path = os.path.join(output_dir, name + "_results.csv")
@@ -136,8 +136,9 @@ def append_result_to_csv(results):
                 # 行已存在 → 只补空值
                 target = index[key_val]
                 for k, v in r.items():
-                    if str(target.get(k, "")).strip() == "" and v is not None:
-                        target[k] = v
+                    if overwrite or str(target.get(k, "")).strip() == "":
+                        if v is not None:
+                            target[k] = v
                 updated_rows += 1
             else:
                 # 新行
@@ -468,7 +469,7 @@ elif args.compressor == "sperr3d":
         results.append(result)
 
     
-        append_result_to_csv(results)
+        append_result_to_csv(results,overwrite=True)
         
 
 
