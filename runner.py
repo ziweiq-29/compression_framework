@@ -32,7 +32,7 @@ def run_pipeline(name, config, input_path, compressed_path,parser):
     
     # 获取原始文件大小
     size = get_size_orginal(input_path)
-
+    result = {}
     # 构造返回结果
     if name == 'sz3' or name == 'qoz' or name == 'sperr3d' or name == 'sperr2d' or name == 'faz':
         result = {
@@ -52,8 +52,7 @@ def run_pipeline(name, config, input_path, compressed_path,parser):
             # "decompressed_file": compress_info.get("decompressed_file", ""),
             "size_of_file": size
         }
-
+    print("results are: ",result)
     
     return result
     
-

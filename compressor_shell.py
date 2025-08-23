@@ -1,12 +1,24 @@
 import subprocess
 from my_parsers import parse_sz3_output, parse_sperr_output,parse_zfp_output
 import re
-
+import shlex
 def run_command(cmd,parser_func):
    
     try:
+        # result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+        # output = result.stdout+result.stderr
+                # 拆分用 '&&' 连接的多条命令
+
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
         output = result.stdout+result.stderr
+        # commands = [c.strip() for c in cmd.split("&&")]
+        # output = ""
+        # for c in commands:
+        #     print(f"[INFO] Running command: {c}")
+        #     # 用 shlex.split 处理参数安全性，避免 shell=True 问题
+        #     args = shlex.split(c)
+        #     result = subprocess.run(args, check=True, capture_output=True, text=True)
+        #     output += result.stdout + result.stderr
     except subprocess.CalledProcessError as e:
         print("[ERROR] Compression command failed.")
         print(f"[ERROR] Exit code: {e.returncode}")

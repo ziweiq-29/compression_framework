@@ -31,6 +31,8 @@ def get_sz3_configs(args):
 def get_QoZ_configs(args):
     configs = []
     values = [args.value] if args.value else args.sweep
+    tflag = f"-T {args.tunning_target}" if getattr(args, "tunning_target", None) else ""
+
     for val in values:
         name = f"qoz"
         arg_flag = mode_to_flag[args.mode]
@@ -40,9 +42,11 @@ def get_QoZ_configs(args):
             "mode": args.mode,
             "arg": f"{arg_flag} {val}",
             "error_bound": val,
-            "datatype": data_type  
+            "datatype": data_type,
+            "tunning_target_flag": tflag
         })
     return configs
+        
 def get_sperr_configs(args):
     configs = []
     values = [args.value] if args.value else args.sweep
@@ -149,6 +153,7 @@ def get_tthresh_configs(args):
 def get_faz_configs(args):
     configs = []
     values = [args.value] if args.value else args.sweep
+    tflag = f"-T {args.tunning_target}" if getattr(args, "tunning_target", None) else ""
     for val in values:
         name = f"faz"
         arg_flag = mode_to_flag[args.mode]
@@ -160,30 +165,11 @@ def get_faz_configs(args):
             "mode": args.mode,
             "arg": f"{arg_flag} {val}",
             "error_bound": val,
-            "datatype": data_type
+            "datatype": data_type,
+            "tunning_target_flag": tflag
         })
     return configs
 
-
-
-
-# def get_faz_configs(args):
-#     configs = []
-#     values = [args.value] if args.value else args.sweep
-#     for val in values:
-#         name = f"faz"
-#         arg_flag = mode_to_flag[args.mode]
-#         data_type = f"-{args.datatype}"
-#         # readable_dtype = dtype_map.get(data_type)
-#             # data_type = args.datatype
-#         configs.append({
-#             "name": name,
-#             "mode": args.mode,
-#             "arg": f"{arg_flag} {val}",
-#             "error_bound": val,
-#             "datatype": data_type
-#         })
-#     return configs
 
 def get_mgard_configs(args):
     configs = []
@@ -196,7 +182,6 @@ def get_mgard_configs(args):
         name = "mgard"
         # arg_flag = mode_to_flag[args.mode]  
         data_type = "s" if args.datatype == "f" else "d"
-
   
         configs.append({
             "name": name,
