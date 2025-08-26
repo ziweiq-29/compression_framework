@@ -13,7 +13,7 @@ compressors:
     compress_template: "/home/ziweiq2/SPERR/build/bin/sperr3d -c --omp 1 --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
 
   sperr2d:
-    compress_template: "/home/ziweiq2/SPERR/build/bin/sperr2d -c --omp 1 --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
+    compress_template: "/home/ziweiq2/SPERR/build/bin/sperr2d -c --ftype {ftype} --dims {dims} --bitstream {compressed} --decomp_f {decompressed} {input}  {arg} --print_stats"
 
   zfp:
     compress_template: "/home/ziweiq2/zfp-1.0.1/build/bin/zfp {datatype} {dims} {dimsList} -i {input} -z {compressed} {mode} {arg} -o {decompressed} -s"
