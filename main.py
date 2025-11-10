@@ -11,6 +11,8 @@ import uuid
 unique_id = str(uuid.uuid4())[:8] 
 import hashlib
 import glob
+import numpy as np
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--compressor", required=True, choices=["sz3", "qoz","sperr3d","sperr2d","zfp","tthresh","faz","mgard"])
@@ -31,6 +33,7 @@ parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
                     help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
 parser.add_argument("--lossless", type=str, default="huffman-zstd", choices=["huffman", "huffman-lz4", "huffman-zstd"], help="MGARD lossless backend")
 parser.add_argument("--verbose", type=str, default="2", choices=["0", "1", "2", "3"], help="MGARD verbose level")
+parser.add_argument("--error_samples", type=str, default="y", choices=["y","n"], help="y for yes, n for no")
 parser.add_argument(
     "-T", "--tunning_target",
     type=str,
@@ -166,6 +169,71 @@ def append_result_to_csv(results,overwrite=False):
 
 
 
+# def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path,eb):
+#     dtype = np.float32 if dtype_flag in ["-f", "f", "s"] else np.float64
+#     total = np.prod(dims)
+#     sample_ratio=0.01
+#     max_points=200_000
+#     print(f"[DEBUG] Loading arrays for error computation: {ori_file}, {dec_file}, shape={dims}")
+
+#     ori = np.fromfile(ori_file, dtype=dtype, count=total)
+#     dec = np.fromfile(dec_file, dtype=dtype, count=total)
+
+#     if ori.size != dec.size:
+#         print(f"[WARN] Size mismatch: ori={ori.size}, dec={dec.size}, skipping error save.")
+#         return None
+
+#     err = ori - dec
+#     rel_err = err / np.maximum(np.abs(ori), 1e-12)
+#     # rel_err = err / np.maximum(np.abs(ori), 1e-12) 
+#     # rel_err = abs(err)/np.maximum(np.abs(ori), 1e-12) 
+#     # rel_err = err / (np.maximum(np.abs(ori), 1e-12) * float(eb))
+#     # rel_err = np.clip(rel_err, -1, 1)
+#     # rel_err = np.clip(err / abs(ori)*float(eb), -1, 1)
+
+#     if  rel_err.size > max_points:
+#         n = min(int(err.size * sample_ratio), max_points)
+#         idx = np.random.choice( rel_err.size, size=n, replace=False)
+#         rel_err =  rel_err[idx]
+#         print(f"[INFO] Sampled {n} / {total} errors for saving")
+
+#     np.save(output_path, rel_err)
+#     print(f"[INFO] Saved error samples → {output_path} (mean={err.mean():.3e}, std={err.std():.3e})")
+#     return err
+
+
+def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path, eb):
+    dtype = np.float32 if dtype_flag in ["-f", "f", "s"] else np.float64
+    total = np.prod(dims)
+
+    ori = np.fromfile(ori_file, dtype=dtype, count=total)
+    dec = np.fromfile(dec_file, dtype=dtype, count=total)
+    if ori.size != dec.size:
+        print("[WARN] Size mismatch, skip")
+        return
+
+
+    err = dec - ori
+
+
+    norm_err = err / float(eb)
+
+
+    norm_err = np.clip(norm_err, -1, 1)
+
+
+    max_points = 200_000
+    if norm_err.size > max_points:
+        idx = np.random.choice(norm_err.size, size=max_points, replace=False)
+        norm_err = norm_err[idx]
+
+    np.save(output_path, norm_err)
+    print(f"[INFO] Saved {output_path} (min={norm_err.min():.3e}, max={norm_err.max():.3e})")
+
+
+
+
+
 
 
 
@@ -208,9 +276,14 @@ if args.compressor == "sz3":
             arg=cfg["arg"],
             datatype=cfg["datatype"]
         )
-
+        
         print(f"[DEBUG] Running compress: {compress_cmd}")
-        # print(f"[DEBUG] Running decompress: {decompress_cmd}")
+        
+        
+        
+        
+        
+    
         
         result={}
         result["compressor name"] = "sz3"
@@ -225,6 +298,25 @@ if args.compressor == "sz3":
             compressed_file,
             parser = "sz3"
         )
+        
+        
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join(output_root,"error_samples", dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
+        
+        
+        
+        
         
         if args.enable_calc_stats:
 
