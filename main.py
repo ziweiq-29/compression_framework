@@ -40,18 +40,53 @@ parser.add_argument(
     default=None,      # 默认为 None，也就是不加 -T
     help="Optional tunning target type (e.g., AC, PSNR)"
 )
+parser.add_argument("--even-subsample", action="store_true",
+                    help="Subsample input data by taking only even-coordinate points")
 
 args = parser.parse_args()
 
 
 
 
+# compressed_file = "tmp_compressed"
+# args.input = os.path.abspath(args.input)
+# input_file_name = os.path.basename(args.input)
 compressed_file = "tmp_compressed"
-args.input = os.path.abspath(args.input)
-input_file_name = os.path.basename(args.input)
-# print("args input is:///////", args.input)
-# print("Extracted input file name:", input_file_name)
-decompressed_file = os.path.abspath("tmp_decompressed.sz.out")
+
+
+raw_input_path = os.path.abspath(args.input)
+args.input = raw_input_path
+input_file_name = os.path.basename(raw_input_path)
+
+
+
+# --------- Even Subsample Preprocessing ---------
+if args.even_subsample:
+    from utils.downsample import even_subsample
+    # load raw binary
+    dtype = np.float32 if args.datatype == "f" else np.float64
+    dims_list = [int(d) for d in args.dims.split()]
+    raw = np.fromfile(args.input, dtype=dtype).reshape(dims_list)
+
+    print(f"[INFO] Original shape: {raw.shape}")
+
+    raw_sub = even_subsample(raw)
+
+    print(f"[INFO] Subsampled shape: {raw_sub.shape}")
+
+    # override dims
+    args.dims = " ".join(str(d) for d in raw_sub.shape)
+
+    # write subsampled file as tmp_input
+    tmp_input_path = os.path.abspath(f"downsample_{input_file_name}")
+    raw_sub.tofile(tmp_input_path)
+
+    # override input path
+    args.input = tmp_input_path
+
+    print(f"[INFO] Using subsampled input file: {tmp_input_path}")
+# ------------------------------------------------
+
 
 with open("configs/compressor_templates.yaml") as f:
     compressor_templates = yaml.safe_load(f)["compressors"]
@@ -93,8 +128,7 @@ name=""
 
 
 
-
-def append_result_to_csv(results,overwrite=False):
+def append_result_to_csv(results, output_dir, name, overwrite=False):
     if results:
         merge_key = "error_bound"
         results_csv_path = os.path.join(output_dir, name + "_results.csv")
@@ -151,7 +185,7 @@ def append_result_to_csv(results,overwrite=False):
                     index[key_val] = new_row
                 added_rows += 1
 
-    # 写回
+        # 写回
         with open(results_csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
             writer.writeheader()
@@ -161,45 +195,12 @@ def append_result_to_csv(results,overwrite=False):
                         row[k] = ""
                 writer.writerow(row)
 
-            print(f"[INFO] Results merged to: {results_csv_path} | updated={updated_rows}, added={added_rows}")
+        print(f"[INFO] Results merged: {results_csv_path} | updated={updated_rows}, added={added_rows}")
     else:
         print("[WARN] No results to write.")
+
     
 
-
-
-
-# def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path,eb):
-#     dtype = np.float32 if dtype_flag in ["-f", "f", "s"] else np.float64
-#     total = np.prod(dims)
-#     sample_ratio=0.01
-#     max_points=200_000
-#     print(f"[DEBUG] Loading arrays for error computation: {ori_file}, {dec_file}, shape={dims}")
-
-#     ori = np.fromfile(ori_file, dtype=dtype, count=total)
-#     dec = np.fromfile(dec_file, dtype=dtype, count=total)
-
-#     if ori.size != dec.size:
-#         print(f"[WARN] Size mismatch: ori={ori.size}, dec={dec.size}, skipping error save.")
-#         return None
-
-#     err = ori - dec
-#     rel_err = err / np.maximum(np.abs(ori), 1e-12)
-#     # rel_err = err / np.maximum(np.abs(ori), 1e-12) 
-#     # rel_err = abs(err)/np.maximum(np.abs(ori), 1e-12) 
-#     # rel_err = err / (np.maximum(np.abs(ori), 1e-12) * float(eb))
-#     # rel_err = np.clip(rel_err, -1, 1)
-#     # rel_err = np.clip(err / abs(ori)*float(eb), -1, 1)
-
-#     if  rel_err.size > max_points:
-#         n = min(int(err.size * sample_ratio), max_points)
-#         idx = np.random.choice( rel_err.size, size=n, replace=False)
-#         rel_err =  rel_err[idx]
-#         print(f"[INFO] Sampled {n} / {total} errors for saving")
-
-#     np.save(output_path, rel_err)
-#     print(f"[INFO] Saved error samples → {output_path} (mean={err.mean():.3e}, std={err.std():.3e})")
-#     return err
 
 
 def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path, eb):
@@ -211,17 +212,9 @@ def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path, eb):
     if ori.size != dec.size:
         print("[WARN] Size mismatch, skip")
         return
-
-
     err = dec - ori
-
-
     norm_err = err / float(eb)
-
-
     norm_err = np.clip(norm_err, -1, 1)
-
-
     max_points = 200_000
     if norm_err.size > max_points:
         idx = np.random.choice(norm_err.size, size=max_points, replace=False)
@@ -246,15 +239,17 @@ def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path, eb):
 
 if args.compressor == "sz3":
     output_root = "outputs"
-    input_path = args.input  # e.g. dataset/NYX/baryon_density.f32
+    input_path = raw_input_path  # e.g. dataset/NYX/baryon_density.f32
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      # NYX
     input_base, ext = os.path.splitext(os.path.basename(input_path))  # ("baryon_density", ".f32")
 
- 
     suffix = f"_{ext[1:].lower()}" if ext else ""
 
-    output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
+    if args.even_subsample:
+        output_dir = os.path.join(output_root, "downsample", dataset_name, f"{input_base}{suffix}")
+    else:
+        output_dir = os.path.join(output_root, dataset_name, f"{input_base}{suffix}")
     
     os.makedirs(output_dir, exist_ok=True)
     name = "sz3"
@@ -278,11 +273,6 @@ if args.compressor == "sz3":
         )
         
         print(f"[DEBUG] Running compress: {compress_cmd}")
-        
-        
-        
-        
-        
     
         
         result={}
@@ -301,7 +291,7 @@ if args.compressor == "sz3":
         
         
         if args.error_samples == 'y':
-            error_samples_dir = os.path.join(output_root,"error_samples", dataset_name, f"{input_base}{suffix}")
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
             os.makedirs(error_samples_dir, exist_ok=True)
             if os.path.exists(decompressed_file):
                 error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
@@ -363,7 +353,7 @@ if args.compressor == "sz3":
         results.append(result)   
     
     
-        append_result_to_csv(results)
+        append_result_to_csv(results, output_dir, name)
 
         
         
@@ -425,6 +415,19 @@ elif args.compressor == "qoz":
             compressed_file,
             parser = "sz3"
         )
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
         
         if args.enable_calc_stats:
             run_calc_err_stats(
@@ -468,7 +471,7 @@ elif args.compressor == "qoz":
     
     
     
-        append_result_to_csv(results)
+        append_result_to_csv(results, output_dir, name)
     
 elif args.compressor == "sperr3d":
     output_root = "outputs"
@@ -516,6 +519,20 @@ elif args.compressor == "sperr3d":
             compressed_file,
             parser = "sperr3d"
         )
+        
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
         dtype_map = {
             "32": "single precision",
             "64": "double precision"
@@ -610,6 +627,19 @@ elif args.compressor == "sperr2d":
             compressed_file,
             parser = "sperr3d"
         )
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
         dtype_map = {
             "32": "single precision",
             "64": "double precision"
@@ -656,7 +686,7 @@ elif args.compressor == "sperr2d":
         
         
     
-        append_result_to_csv(results)
+        append_result_to_csv(results, output_dir, name)
 
 
 
@@ -714,6 +744,19 @@ elif args.compressor == "zfp":
             compressed_file,
             parser = "zfp"
         )
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
         
         if args.enable_calc_stats:
             dtype="-f" if args.datatype == "f" else "-d"
@@ -762,7 +805,7 @@ elif args.compressor == "zfp":
         
         
     
-        append_result_to_csv(results)
+        append_result_to_csv(results, output_dir, name)
 
 
 elif args.compressor == "tthresh":
@@ -810,6 +853,19 @@ elif args.compressor == "tthresh":
             compressed_file,
             parser="tthresh"
         )
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
 
         # 添加基本信息
         dtype_map = {
@@ -863,7 +919,7 @@ elif args.compressor == "tthresh":
         
         
     
-        append_result_to_csv(results)
+        append_result_to_csv(results, output_dir, name)
         
 elif args.compressor == "faz":
     output_root = "outputs"
@@ -921,6 +977,20 @@ elif args.compressor == "faz":
             parser = "faz"
         )
         
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
+        
         if args.enable_calc_stats:
 
             run_calc_err_stats(
@@ -969,7 +1039,7 @@ elif args.compressor == "faz":
         
         
     
-        append_result_to_csv(results)
+        append_result_to_csv(results, output_dir, name)
         
         
 
@@ -1027,6 +1097,19 @@ elif args.compressor == "mgard":
             compressed_file,
             parser="mgard"
         )
+        if args.error_samples == 'y':
+            error_samples_dir = os.path.join("error_samples",args.compressor,dataset_name, f"{input_base}{suffix}")
+            os.makedirs(error_samples_dir, exist_ok=True)
+            if os.path.exists(decompressed_file):
+                error_path = os.path.join(error_samples_dir, f"errors_{cfg['error_bound']}.npy")
+                save_error_samples(
+                    ori_file=args.input,
+                    dec_file=decompressed_file,
+                    dtype_flag=cfg["datatype"],
+                    dims=[int(d) for d in args.dims.split()],
+                    output_path=error_path,
+                    eb=cfg['error_bound']
+                )
 
         # if args.enable_calc_stats:
         #     run_calc_err_stats(
@@ -1077,16 +1160,16 @@ elif args.compressor == "mgard":
         
         
 
-        append_result_to_csv(results)    
+        append_result_to_csv(results, output_dir, name)    
 
 
 
-df = pd.DataFrame(results)
-print("\n Compression Results:")
-print(df)
-output_dir = "outputs"
-os.makedirs(output_dir, exist_ok=True)  # 如果文件夹不存在就创建
+# df = pd.DataFrame(results)
+# print("\n Compression Results:")
+# print(df)
+# output_dir = "outputs"
+# os.makedirs(output_dir, exist_ok=True)  # 如果文件夹不存在就创建
 
-df.to_csv(os.path.join(output_dir, name + "_results.csv"), index=False)
-df.to_csv(name+"_results.csv", index=False)
+# df.to_csv(os.path.join(output_dir, name + "_results.csv"), index=False)
+# df.to_csv(name+"_results.csv", index=False)
 
