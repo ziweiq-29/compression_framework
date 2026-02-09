@@ -33,13 +33,15 @@ parser.add_argument("--qcat-evaluators", type=str, default="ssim,compareData",
                     help="Comma-separated list of qcat evaluators to use (default: 'ssim,compareData')")
 parser.add_argument("--lossless", type=str, default="huffman-zstd", choices=["huffman", "huffman-lz4", "huffman-zstd"], help="MGARD lossless backend")
 parser.add_argument("--verbose", type=str, default="2", choices=["0", "1", "2", "3"], help="MGARD verbose level")
-parser.add_argument("--error_samples", type=str, default="y", choices=["y","n"], help="y for yes, n for no")
+# parser.add_argument("--error_samples", type=str, default="n", choices=["y","n"], help="y for yes, n for no")
 parser.add_argument(
     "-T", "--tunning_target",
     type=str,
     default=None,      # 默认为 None，也就是不加 -T
     help="Optional tunning target type (e.g., AC, PSNR)"
 )
+parser.add_argument("--output-dir", type=str, default=None,
+                    help="Output directory root. Path is built as <output-dir>/<dataset>/<var_dir>/ (e.g. outputs/HALO/NYX/baryon_density_f32/). Default None => outputs.")
 
 args = parser.parse_args()
 
@@ -202,52 +204,39 @@ def append_result_to_csv(results,overwrite=False):
 #     return err
 
 
-def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path, eb):
-    dtype = np.float32 if dtype_flag in ["-f", "f", "s"] else np.float64
-    total = np.prod(dims)
+# def save_error_samples(ori_file, dec_file, dtype_flag, dims, output_path, eb):
+#     dtype = np.float32 if dtype_flag in ["-f", "f", "s"] else np.float64
+#     total = np.prod(dims)
 
-    ori = np.fromfile(ori_file, dtype=dtype, count=total)
-    dec = np.fromfile(dec_file, dtype=dtype, count=total)
-    if ori.size != dec.size:
-        print("[WARN] Size mismatch, skip")
-        return
-
-
-    err = dec - ori
+#     ori = np.fromfile(ori_file, dtype=dtype, count=total)
+#     dec = np.fromfile(dec_file, dtype=dtype, count=total)
+#     if ori.size != dec.size:
+#         print("[WARN] Size mismatch, skip")
+#         return
 
 
-    norm_err = err / float(eb)
+    # err = dec - ori
 
 
-    norm_err = np.clip(norm_err, -1, 1)
+    # norm_err = err / float(eb)
 
 
-    max_points = 200_000
-    if norm_err.size > max_points:
-        idx = np.random.choice(norm_err.size, size=max_points, replace=False)
-        norm_err = norm_err[idx]
-
-    np.save(output_path, norm_err)
-    print(f"[INFO] Saved {output_path} (min={norm_err.min():.3e}, max={norm_err.max():.3e})")
+    # norm_err = np.clip(norm_err, -1, 1)
 
 
+    # max_points = 200_000
+    # if norm_err.size > max_points:
+    #     idx = np.random.choice(norm_err.size, size=max_points, replace=False)
+    #     norm_err = norm_err[idx]
 
-
-
-
-
-
-
-
-
-
+    # np.save(output_path, norm_err)
+    # print(f"[INFO] Saved {output_path} (min={norm_err.min():.3e}, max={norm_err.max():.3e})")
 
 
 
 if args.compressor == "sz3":
-    output_root = "outputs"
-    input_path = args.input  # e.g. dataset/NYX/baryon_density.f32
-
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
     dataset_name = os.path.basename(os.path.dirname(input_path))      # NYX
     input_base, ext = os.path.splitext(os.path.basename(input_path))  # ("baryon_density", ".f32")
 
@@ -372,9 +361,8 @@ if args.compressor == "sz3":
         
         
 elif args.compressor == "qoz":
-    
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -471,8 +459,8 @@ elif args.compressor == "qoz":
         append_result_to_csv(results)
     
 elif args.compressor == "sperr3d":
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -566,8 +554,8 @@ elif args.compressor == "sperr3d":
 
 
 elif args.compressor == "sperr2d":
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -666,8 +654,8 @@ elif args.compressor == "sperr2d":
 
 
 elif args.compressor == "zfp":
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -766,8 +754,8 @@ elif args.compressor == "zfp":
 
 
 elif args.compressor == "tthresh":
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -866,8 +854,8 @@ elif args.compressor == "tthresh":
         append_result_to_csv(results)
         
 elif args.compressor == "faz":
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -974,8 +962,8 @@ elif args.compressor == "faz":
         
 
 elif args.compressor == "mgard":
-    output_root = "outputs"
-    input_path = args.input  
+    output_root = args.output_dir if args.output_dir else "outputs"
+    input_path = args.input
 
     dataset_name = os.path.basename(os.path.dirname(input_path))      
     input_base, ext = os.path.splitext(os.path.basename(input_path)) 
@@ -1084,7 +1072,7 @@ elif args.compressor == "mgard":
 df = pd.DataFrame(results)
 print("\n Compression Results:")
 print(df)
-output_dir = "outputs"
+output_dir = args.output_dir if args.output_dir else "outputs"
 os.makedirs(output_dir, exist_ok=True)  # 如果文件夹不存在就创建
 
 df.to_csv(os.path.join(output_dir, name + "_results.csv"), index=False)
