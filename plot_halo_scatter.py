@@ -43,13 +43,13 @@ for comp, g in df.groupby("compressor name"):
     )
 
 plt.xlabel("qcat_global_ssim")
-plt.ylabel("max")
-plt.title("qcat_global_ssim vs p999 (merged by compressor + error bound)")
+plt.ylabel("wasserstein_distance")
+plt.title("qcat_global_ssim vs wasserstein_distance (merged by compressor + error bound)")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
 
-out_path = os.path.join(PLOT_DIR, "ssim_vs_max_scatter.png")
+out_path = os.path.join(PLOT_DIR, "ssim_vs_wasserstein_distance_scatter.png")
 plt.savefig(out_path, dpi=300)
 plt.close()
 
