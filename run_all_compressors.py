@@ -17,7 +17,7 @@ error_bounds_tthresh = [float(e) for e in error_bounds]
 # 根目录
 root_dir = "dataset/NYX"
 # compressors = ["sperr3d","sz3","faz","qoz","tthresh","zfp"]
-compressors = ["sz3"]
+compressors = ["sperr"]
 # 输出根目录：outputs/HALO，其下与 main 一致为 <dataset>/<var_dir>
 output_root = "outputs/HALO"
 # dims = len(dims.split())
