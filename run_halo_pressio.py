@@ -82,12 +82,15 @@ def main():
                 "-M", "all",
             ]
 
+            # 与手动一致：在 halo 目录下跑 pressio，避免 cwd 导致 temp 文件或 external 行为不一致
+            halo_dir = os.path.dirname(HALO_PIPELINE)
             print("Command (pressio)", " ".join(cmd))
             proc = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                cwd=halo_dir,
             )
 
             if proc.returncode != 0:
@@ -108,9 +111,9 @@ def main():
 
             missing = False
             for key, pattern in QOI_PATTERNS.items():
-                m = re.search(pattern, stdout)
-                if m:
-                    row[key] = float(m.group(1))
+                matches = re.findall(pattern, stdout)
+                if matches:
+                    row[key] = float(matches[-1])
                 else:
                     row[key] = None
                     missing = True
