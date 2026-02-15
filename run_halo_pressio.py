@@ -39,7 +39,7 @@ def main():
     parser.add_argument("--compressor", default="sz3")
     parser.add_argument("--datatype", default="float")
     parser.add_argument("--output-dir", "-o", required=True,
-                        help="Full path to output folder (same as main’s output_dir). CSV name: <compressor>_halo.csv")
+                        help="Full path to output folder (same as main's output_dir). CSV name: <compressor>_halo.csv")
 
     args = parser.parse_args()
 
@@ -57,14 +57,9 @@ def main():
         for eb in args.error_bounds:
             print(f"[HALO] {os.path.basename(args.input)} | rel={eb}")
 
-            # external:command 格式：python run_pressio_pipeline.py --external_mode --input <绝对路径> --dim ... --rel ... --compressor ...
-            input_dir= os.path.abspath(args.input)
-            dims_str = " ".join(f"--dim {d}" for d in args.dims)
-            external_cmd = (
-                f"python {HALO_PIPELINE} --external_mode "
-                f"--input {input_dir} {dims_str} "
-                f"--rel {eb} --compressor {args.compressor}"
-            )
+            # 与手动 pressio 命令一致：minimal external:command，pressio 自动注入 --input --decompressed --dim 等
+            input_dir = os.path.abspath(args.input)
+            external_cmd = f"python {HALO_PIPELINE} --external_mode"
 
             cmd = [
                 "pressio",
@@ -72,6 +67,9 @@ def main():
                 "-b", f"compressor={args.compressor}",
                 "-o", f"rel={eb}",
             ]
+            input_lower = input_dir.lower()
+            if input_lower.endswith(".h5") or input_lower.endswith(".hdf5"):
+                cmd += ["-I", "/native_fields/baryon_density"]
             for d in args.dims:
                 cmd += ["-d", d]
             cmd += [

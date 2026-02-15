@@ -11,8 +11,8 @@ mode = "REL"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
 # qcat_evaluators = "ssim"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
-error_bounds = ["1e-1", "5e-2", "1e-2", "5e-3", "1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6"]
-# error_bounds = ["1e-1", "5e-2"]
+# error_bounds = ["1e-1", "5e-2", "1e-2", "5e-3", "1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6"]
+error_bounds = ["1e-1", "5e-2"]
 error_bounds_tthresh = [float(e) for e in error_bounds]
 # 根目录
 root_dir = "dataset/NYX"
@@ -71,20 +71,12 @@ for fname in _file_list:
             "--output-dir", output_dir,
         ]
         
+        
         try:
             # print("Command (main):", " ".join(cmd))
             # subprocess.run(cmd, check=True)
             print("Command (halo):", " ".join(cmd_halo))
             subprocess.run(cmd_halo, check=True)
-            # 按 compressor 和 error_bound 合并 main 的 *_results.csv 与 HALO 的 *_halo.csv
-            # merge_cmd = [
-            #     "python", "merge_halo_results.py",
-            #     "--output-dir", output_root,
-            #     "--dataset", dataset_name,
-            #     "--var-dir", var_dir,
-            #     "--compressor", compressor,
-            # ]
-            # subprocess.run(merge_cmd, check=False)  # 合并失败不中断整体流程
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] Failed on {fname}. Skipping.")
             print(e)
