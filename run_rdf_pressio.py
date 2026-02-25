@@ -1,117 +1,133 @@
-"""
-RDF on EXAALT: raw vs decompressed → dists.
-用法：--standalone --decompressed_x/y/z <path>，读三份解压文件算 RDF，输出 dists。
-Uses freud when RDF_USE_FREUD=1; else NumPy RDF.
-"""
+#!/usr/bin/env python3
 import argparse
-import json
+import csv
 import os
+import re
+import subprocess
 import sys
-import numpy as np
+from datetime import datetime
 
+# === 固定路径（按你现在的环境） ===
+RDF_DIR = os.path.expanduser("/anvil/projects/x-cis240669/RDF")
+RDF_PIPELINE = os.path.join(RDF_DIR, "run_pressio_external.py")
+RDF_PYTHON = "/anvil/projects/x-cis240669/RDF/rdf_env/bin/python"
+PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
 
-_USE_FREUD = False
-try:
-    if os.environ.get("RDF_USE_FREUD", "").lower() in ("1", "true", "yes"):
-        from freud.box import Box
-        from freud.density import RDF
-        _USE_FREUD = True
-except Exception:
-    pass
+# === 只解析 pressio 输出的 [QOI] 行（不做计算）===
+QOI_PATTERNS = {
+    "mean": r"\[QOI\]\s+mean\s*:\s*([0-9.eE+-]+)",
+    "min": r"\[QOI\]\s+min\s*:\s*([0-9.eE+-]+)",
+    "max": r"\[QOI\]\s+max\s*:\s*([0-9.eE+-]+)",
+    "median": r"\[QOI\]\s+median\s*:\s*([0-9.eE+-]+)",
+    "p90": r"\[QOI\]\s+p90\s*:\s*([0-9.eE+-]+)",
+    "p99": r"\[QOI\]\s+p99\s*:\s*([0-9.eE+-]+)",
+    "p999": r"\[QOI\]\s+p999\s*:\s*([0-9.eE+-]+)",
+    "wasserstein_distance": r"\[QOI\]\s+wasserstein_distance\s*:\s*([0-9.eE+-]+)",
+}
 
-timestep = 0
-DEFAULT_NT = 7852
-DEFAULT_NA = 1037
-DEFAULT_RAW_PREFIX = "/anvil/projects/x-cis240669/EXAALT/SDRBENCH-exaalt-helium/dataset1-7852x1037"
+def output_csv_path(output_dir: str, compressor: str) -> str:
+    os.makedirs(output_dir, exist_ok=True)
+    return os.path.join(output_dir, f"{compressor}_rdf.csv")
 
+def write_debug_log(output_dir: str, compressor: str, eb: str, text: str) -> str:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(output_dir, f"debug_qoi_{compressor}_rel{eb}_{ts}.log")
+    with open(path, "w") as f:
+        f.write(text)
+    return path
 
-def read_raw_frame(prefix, t, nt, na):
-    def load_axis(suffix):
-        arr = np.fromfile(f"{prefix}.{suffix}.f32.dat", dtype=np.float32)
-        return arr.reshape(nt, na)
-    x = load_axis("x")[t]
-    y = load_axis("y")[t]
-    z = load_axis("z")[t]
-    return np.stack([x, y, z], axis=1).astype(np.float32)
-
-
-def _compute_rdf_numpy(pos, bins=300):
-    """Pure NumPy RDF (same interface as freud path)."""
-    pos = np.asarray(pos, dtype=np.float64)
-    mins = pos.min(axis=0)
-    pos = pos - mins
-    L = pos.max(axis=0)
-    rmax = min(L) / 2
-    N = pos.shape[0]
-    rho = N / (L[0] * L[1] * L[2])
-    edges = np.linspace(0, rmax, bins + 1)
-    dr = edges[1] - edges[0]
-    # Pairwise distances (upper triangle, no self)
-    d = np.sqrt(((pos[:, None, :] - pos[None, :, :]) ** 2).sum(axis=2))
-    d = d[np.triu_indices(N, k=1)]
-    hist, _ = np.histogram(d, bins=edges)
-    hist = hist.astype(np.float64)
-    r = (edges[:-1] + edges[1:]) / 2
-    vol_shell = 4 * np.pi * (edges[1:] ** 3 - edges[:-1] ** 3) / 3
-    ideal = (N / 2) * rho * vol_shell
-    np.maximum(ideal, 1e-300, out=ideal)
-    g = hist / ideal
-    return g
-
-
-def compute_rdf(pos, bins=300):
-    pos = np.asarray(pos, dtype=np.float32)
-    mins = pos.min(axis=0)
-    pos = pos - mins
-    L = pos.max(axis=0)
-    box_length = max(L)
-    rmax = min(L) / 2
-    if _USE_FREUD:
-        box = Box.cube(box_length)
-        rdf = RDF(bins=bins, r_max=rmax)
-        rdf.compute((box, pos))
-        return np.asarray(rdf.rdf, dtype=np.float64)
-    return _compute_rdf_numpy(pos.astype(np.float64), bins=bins)
-
-
-def rdf_distance(g1, g2):
-    dists=np.abs(g1-g2)
-    return dists
+def parse_qoi_from_text(text: str):
+    """只解析，不计算。取每个字段最后一次出现的值。"""
+    out = {}
+    for k, pat in QOI_PATTERNS.items():
+        m = re.findall(pat, text)
+        out[k] = float(m[-1]) if m else None
+    return out
 
 def main():
-    parser = argparse.ArgumentParser(description="RDF: raw vs decompressed → dists")
-    parser.add_argument("--standalone", action="store_true", required=True, help="必须：读三份解压文件")
-    parser.add_argument("--decompressed_x", required=True, help="解压后的 x 文件")
-    parser.add_argument("--decompressed_y", required=True, help="解压后的 y 文件")
-    parser.add_argument("--decompressed_z", required=True, help="解压后的 z 文件")
-    parser.add_argument("--raw_prefix", default=DEFAULT_RAW_PREFIX, help=f"Raw .x/.y/.z.f32.dat 前缀 (default: {DEFAULT_RAW_PREFIX})")
-    parser.add_argument("--nt", type=int, default=DEFAULT_NT, help=f"时间步数 (default: {DEFAULT_NT})")
-    parser.add_argument("--na", type=int, default=DEFAULT_NA, help=f"原子数 (default: {DEFAULT_NA})")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Run RDF external and parse [QOI] lines into CSV (no computation).")
+    ap.add_argument("--input", required=True, help="Prefix path (no .x/.y/.z suffix), e.g. .../10x32000")
+    ap.add_argument("--dims", nargs="+", required=True, help="Dims: nt na")
+    ap.add_argument("--error-bounds", nargs="+", required=True, help="Error bounds list, e.g. 1e-3 5e-4")
+    ap.add_argument("--compressor", default="sz3")
+    ap.add_argument("--datatype", default="float")  # 保留接口，当前不用
+    ap.add_argument("--output-dir", "-o", required=True, help="Output folder; CSV name is <compressor>_rdf.csv")
+    ap.add_argument("--pressio-opts", action="append", default=[],
+                    help='Forward to run_pressio_external.py. Can repeat. Example: --pressio-opts "sz3:algorithm_str=ALGO_BIOMD"')
+    ap.add_argument("--print-output-on-fail", action="store_true",
+                    help="If QOI missing, also print last ~2000 chars to stderr for quick glance.")
+    args = ap.parse_args()
 
-    nt, na = args.nt, args.na
-    raw_prefix = args.raw_prefix
+    input_prefix = os.path.abspath(args.input)
+    nt, na = int(args.dims[0]), int(args.dims[1])
 
-    for k in ("decompressed_x", "decompressed_y", "decompressed_z"):
-        path = getattr(args, k)
-        if not path or not os.path.isfile(path):
-            print(f"Missing or not a file: --{k}", file=sys.stderr)
-            sys.exit(1)
+    output_csv = output_csv_path(args.output_dir, args.compressor)
+    print(f"[RDF] Writing results to {output_csv}")
 
-    coords_dec = np.stack([
-        np.fromfile(args.decompressed_x, dtype=np.float32).reshape(nt, na)[timestep],
-        np.fromfile(args.decompressed_y, dtype=np.float32).reshape(nt, na)[timestep],
-        np.fromfile(args.decompressed_z, dtype=np.float32).reshape(nt, na)[timestep],
-    ], axis=1).astype(np.float32)
-    coords_raw = read_raw_frame(raw_prefix, timestep, nt, na)
-    rdf_raw = compute_rdf(coords_raw)
-    rdf_dec = compute_rdf(coords_dec)
-    dists = rdf_distance(rdf_raw , rdf_dec)
-    # rdf_dir = os.path.dirname(os.path.abspath(__file__))
-    np.save(os.path.join("dists.npy"), dists)
-    np.save(os.path.join("rdf_raw.npy"), rdf_raw)
-    np.save(os.path.join("rdf_dec.npy"), rdf_dec)
+    with open(output_csv, "w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["compressor name", "input", "error_bound"] + list(QOI_PATTERNS.keys()),
+        )
+        writer.writeheader()
 
+        for eb in args.error_bounds:
+            print(f"[RDF] {os.path.basename(input_prefix)} | rel={eb}")
+
+            cmd = [
+                "env", "-u", "PYTHONPATH",
+                RDF_PYTHON, RDF_PIPELINE,
+                "--prefix", input_prefix,
+                "--nt", str(nt),
+                "--na", str(na),
+                "--rel", str(eb),
+                "--compressor", args.compressor,
+                "--pressio-cmd", PRESSIO,
+            ]
+            for opt in args.pressio_opts:
+                cmd += ["--pressio-opts", opt]
+
+            # 重要：stdout/stderr 都抓住，合并后解析
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=RDF_DIR,
+            )
+
+            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+
+            if proc.returncode != 0:
+                print(f"[ERROR] RDF pipeline failed for eb={eb}", file=sys.stderr)
+                log_path = write_debug_log(args.output_dir, args.compressor, str(eb), combined)
+                print(f"[ERROR] Full output saved to: {log_path}", file=sys.stderr)
+                continue
+
+            qoi = parse_qoi_from_text(combined)
+
+            row = {
+                "compressor name": args.compressor,
+                "input": os.path.basename(input_prefix),
+                "error_bound": eb,
+                **qoi,
+            }
+
+            missing = [k for k, v in qoi.items() if v is None]
+            if missing:
+                print(f"[WARN] Missing QOI field(s): {missing}")
+                log_path = write_debug_log(args.output_dir, args.compressor, str(eb), combined)
+                print(f"[WARN] Full output saved to: {log_path}")
+                if args.print_output_on_fail:
+                    tail = combined[-2000:] if len(combined) > 2000 else combined
+                    print("----- output tail -----", file=sys.stderr)
+                    print(tail, file=sys.stderr)
+                    print("-----------------------", file=sys.stderr)
+
+            writer.writerow(row)
+            f.flush()
+
+    print(f"[RDF] Done. Results written to {output_csv}")
 
 if __name__ == "__main__":
     main()

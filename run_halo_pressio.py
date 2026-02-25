@@ -7,8 +7,8 @@ import os
 import sys
 
 # HALO pipeline 脚本
-HALO_PIPELINE = os.path.expanduser("/home/ziweiq2/halo/run_pressio_pipeline.py")
-
+HALO_PIPELINE = os.path.expanduser("/anvil/projects/x-cis240669/halo/run_pressio_pipeline.py")
+PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
 # ======================
 # QOI regex patterns
 # ======================
@@ -59,10 +59,11 @@ def main():
 
             # 与手动 pressio 命令一致：minimal external:command，pressio 自动注入 --input --decompressed --dim 等
             input_dir = os.path.abspath(args.input)
-            external_cmd = f"python {HALO_PIPELINE} --external_mode"
+            HALO_PYTHON = "/home/x-zqiu4/halo_env/bin/python"
+            external_cmd = f"env -u PYTHONPATH {HALO_PYTHON} {HALO_PIPELINE} --external_mode"
 
             cmd = [
-                "pressio",
+                PRESSIO,
                 "-i", input_dir,
                 "-b", f"compressor={args.compressor}",
                 "-o", f"rel={eb}",
@@ -84,7 +85,7 @@ def main():
 
             # 与手动一致：在 halo 目录下跑 pressio，避免 cwd 导致 temp 文件或 external 行为不一致
             halo_dir = os.path.dirname(HALO_PIPELINE)
-            print("Command (pressio)", " ".join(cmd))
+            print("Command (pressio_halo)", " ".join(cmd))
             proc = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
