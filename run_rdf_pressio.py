@@ -64,70 +64,120 @@ def main():
     output_csv = output_csv_path(args.output_dir, args.compressor)
     print(f"[RDF] Writing results to {output_csv}")
 
-    with open(output_csv, "w", newline="") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=["compressor name", "input", "error_bound"] + list(QOI_PATTERNS.keys()),
+    fieldnames = ["compressor name", "input", "error_bound"] + list(QOI_PATTERNS.keys())
+
+    # 数值标准化，避免 1e-3 和 0.001 被当成不同（参考 main.append_result_to_csv）
+    def norm(v):
+        try:
+            return "{:.12g}".format(float(v))
+        except Exception:
+            return str(v).strip() if v is not None else ""
+
+    # 读取已有 CSV，按 (compressor name, input, error_bound) 建索引
+    old_rows = []
+    if os.path.exists(output_csv):
+        try:
+            with open(output_csv, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                old_rows = list(reader)
+        except Exception:
+            old_rows = []
+
+    index = {}
+    for row in old_rows:
+        comp = str(row.get("compressor name", "")).strip()
+        inp = str(row.get("input", "")).strip()
+        eb_val = norm(row.get("error_bound", ""))
+        if comp and inp and eb_val:
+            index[(comp, inp, eb_val)] = row
+
+    compressor_name = args.compressor
+    input_basename = os.path.basename(input_prefix)
+    added_rows = 0
+    updated_rows = 0
+
+    for eb in args.error_bounds:
+        key = (compressor_name, input_basename, norm(eb))
+        if key in index:
+            print(f"[RDF] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
+            continue
+
+        print(f"[RDF] {input_basename} | rel={eb}")
+
+        cmd = [
+            "env", "-u", "PYTHONPATH",
+            RDF_PYTHON, RDF_PIPELINE,
+            "--prefix", input_prefix,
+            "--nt", str(nt),
+            "--na", str(na),
+            "--rel", str(eb),
+            "--compressor", args.compressor,
+            "--pressio-cmd", PRESSIO,
+        ]
+        for opt in args.pressio_opts:
+            cmd += ["--pressio-opts", opt]
+
+        # 重要：stdout/stderr 都抓住，合并后解析
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=RDF_DIR,
         )
+
+        combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+
+        if proc.returncode != 0:
+            print(f"[ERROR] RDF pipeline failed for eb={eb}", file=sys.stderr)
+            log_path = write_debug_log(args.output_dir, args.compressor, str(eb), combined)
+            print(f"[ERROR] Full output saved to: {log_path}", file=sys.stderr)
+            continue
+
+        qoi = parse_qoi_from_text(combined)
+
+        row = {
+            "compressor name": args.compressor,
+            "input": input_basename,
+            "error_bound": eb,
+            **qoi,
+        }
+
+        missing = [k for k, v in qoi.items() if v is None]
+        if missing:
+            print(f"[WARN] Missing QOI field(s): {missing}")
+            log_path = write_debug_log(args.output_dir, args.compressor, str(eb), combined)
+            print(f"[WARN] Full output saved to: {log_path}")
+            if args.print_output_on_fail:
+                tail = combined[-2000:] if len(combined) > 2000 else combined
+                print("----- output tail -----", file=sys.stderr)
+                print(tail, file=sys.stderr)
+                print("-----------------------", file=sys.stderr)
+
+        # 合并到 old_rows：若 key 已存在则更新，否则追加（与 main.append_result_to_csv 类似）
+        if key in index:
+            target = index[key]
+            for k, v in row.items():
+                if v is not None and str(target.get(k, "")).strip() == "":
+                    target[k] = v
+            updated_rows += 1
+        else:
+            full_row = {k: row.get(k, "") for k in fieldnames}
+            old_rows.append(full_row)
+            index[key] = full_row
+            added_rows += 1
+
+    # 写回完整 CSV
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-
-        for eb in args.error_bounds:
-            print(f"[RDF] {os.path.basename(input_prefix)} | rel={eb}")
-
-            cmd = [
-                "env", "-u", "PYTHONPATH",
-                RDF_PYTHON, RDF_PIPELINE,
-                "--prefix", input_prefix,
-                "--nt", str(nt),
-                "--na", str(na),
-                "--rel", str(eb),
-                "--compressor", args.compressor,
-                "--pressio-cmd", PRESSIO,
-            ]
-            for opt in args.pressio_opts:
-                cmd += ["--pressio-opts", opt]
-
-            # 重要：stdout/stderr 都抓住，合并后解析
-            proc = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=RDF_DIR,
-            )
-
-            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
-
-            if proc.returncode != 0:
-                print(f"[ERROR] RDF pipeline failed for eb={eb}", file=sys.stderr)
-                log_path = write_debug_log(args.output_dir, args.compressor, str(eb), combined)
-                print(f"[ERROR] Full output saved to: {log_path}", file=sys.stderr)
-                continue
-
-            qoi = parse_qoi_from_text(combined)
-
-            row = {
-                "compressor name": args.compressor,
-                "input": os.path.basename(input_prefix),
-                "error_bound": eb,
-                **qoi,
-            }
-
-            missing = [k for k, v in qoi.items() if v is None]
-            if missing:
-                print(f"[WARN] Missing QOI field(s): {missing}")
-                log_path = write_debug_log(args.output_dir, args.compressor, str(eb), combined)
-                print(f"[WARN] Full output saved to: {log_path}")
-                if args.print_output_on_fail:
-                    tail = combined[-2000:] if len(combined) > 2000 else combined
-                    print("----- output tail -----", file=sys.stderr)
-                    print(tail, file=sys.stderr)
-                    print("-----------------------", file=sys.stderr)
-
+        for row in old_rows:
+            for k in fieldnames:
+                if k not in row:
+                    row[k] = ""
             writer.writerow(row)
-            f.flush()
 
-    print(f"[RDF] Done. Results written to {output_csv}")
+    print(f"[RDF] Done. Results written to {output_csv} | updated={updated_rows}, added={added_rows}")
 
 if __name__ == "__main__":
     main()
