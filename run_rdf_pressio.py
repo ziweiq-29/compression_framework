@@ -112,7 +112,7 @@ def main():
             "--na", str(na),
             "--rel", str(eb),
             "--compressor", args.compressor,
-            "--pressio-cmd", PRESSIO,
+            "--pressio", PRESSIO,
         ]
         for opt in args.pressio_opts:
             cmd += ["--pressio-opts", opt]
