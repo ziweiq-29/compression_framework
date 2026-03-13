@@ -1,9 +1,12 @@
+import csv
 import subprocess
 import glob
 import os
 import re
 import shutil
 import sys
+
+PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
 
 # 通用参数
 dims = "512 512 512"
@@ -12,16 +15,18 @@ mode = "REL"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
 # qcat_evaluators = "ssim"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
-# error_bounds = ["1e-1", "5e-2", "1e-2", "5e-3", "1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6"]
-error_bounds = ["1e-2"]
+error_bounds = ["1e-1", "5e-2", "1e-2", "5e-3", "1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6"]
+# error_bounds = ["5e-4","5e-5"]
 error_bounds_tthresh = [float(e) for e in error_bounds]
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-root_dir = "/anvil/projects/x-cis240669/EXAALT"  
+# root_dir = "/anvil/projects/x-cis240669/EXAALT"  
 # root_dir = "/anvil/projects/x-cis240669/NYX"  
 # root_dir = "/anvil/projects/x-cis240669/LAMMPS-lj" 
-compressors = ["sz3"]
-output_root = os.path.join(_SCRIPT_DIR, "outputs", "RDF")
-MAX_FILES = 2
+root_dir = "/anvil/projects/x-cis240669/CESM" 
+compressors = ["sperr","mgard","sz3","zfp"]
+# compressors = ["sz3"]
+output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
+MAX_FILES = 500
 
 # 按结构检测：子目录下存在 .x/.y/.z.f32.dat 成对则用 RDF(EXAALT-style)，否则用 STANDARD
 _exaalt_datasets = []  # [(dataset_dir, dataset_name, [prefix, ...]), ...]
@@ -130,43 +135,488 @@ def run_halo():
                 except subprocess.CalledProcessError as e:
                     print(f"[ERROR] Failed on {fname}. Skipping.")
                     print(e)
-def run_standard():
-    """非 EXAALT：按单文件跑 main + halo（或仅 halo）"""
-    for fname in _file_list:
-        if "log10" in fname:
-            print(f"[SKIP] Skipping {fname} because it contains 'log10'")
+standard_output_root = os.path.join(_SCRIPT_DIR, "outputs", "STANDARD")
+
+# EXAALT（exxalt）与 LAMMPS-lj 两种根目录均可：prefixed（*.x.f32.dat + NxM）与 flat（x/y/z.f32.dat）自动识别
+EXAALT_ROOT = "/anvil/projects/x-cis240669/EXAALT"
+LAMMPS_LJ_ROOT = "/anvil/projects/x-cis240669/LAMMPS-lj"
+# 任选一个，或 run_standard_exxalt([EXAALT_ROOT, LAMMPS_LJ_ROOT]) 一次跑两个
+exxalt_root = LAMMPS_LJ_ROOT  # 改为 EXAALT_ROOT 即跑 exaalt 数据
+
+
+def _short_metric_name(full_key):
+    """去掉 'metric:' 前缀和 '<type>' 后缀，如 error_stat:psnr<double> -> psnr。"""
+    name = full_key.split(":")[-1] if ":" in full_key else full_key
+    if "<" in name:
+        name = name.split("<")[0]
+    return name
+
+
+def _parse_pressio_metrics(text):
+    """Parse pressio stdout: 'metric:name<type> = value' -> dict 短名 -> float or str。"""
+    out = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if " = " not in line:
             continue
-        for compressor in compressors:
-            input_path = os.path.join(root_dir, fname)
-            print(f"\n=== Running {compressor} on {fname} ===")
+        key_part, value_part = line.split(" = ", 1)
+        key_part = key_part.strip()
+        value_part = value_part.strip()
+        short_key = _short_metric_name(key_part)
+        try:
+            v = float(value_part)
+        except ValueError:
+            v = value_part
+        out[short_key] = v
+    return out
+
+
+def run_standard():
+    """非 EXAALT：直接跑 pressio（不跑 main.py），-m error_stat -m ssim -M all，结果写 CSV。
+    按输入文件分子目录，与 HALO 一致：outputs/STANDARD/<dataset_name>/<input_base>_<ext>/<compressor>_standard.csv
+    """
+    # EXAALT 布局时顶层只走了 is_exaalt 分支，未定义 _file_list / dataset_name；此处与顶层 else 一致
+    dataset_name = os.path.basename(os.path.normpath(root_dir))
+    # 遍历 root_dir 下所有 .dat（递归），只压缩这些文件
+    dat_paths = sorted(glob.glob(os.path.join(root_dir, "**", "*.dat"), recursive=True))
+    if MAX_FILES is not None:
+        dat_paths = dat_paths[:MAX_FILES]
+    print(f"[STANDARD] root_dir={root_dir} | {len(dat_paths)} .dat file(s)")
+
+    # CSV 列名只用短名（无 metric: 前缀），如 mse, psnr, ssim
+    base_metric_keys = [
+        "compression_rate", "compression_rate_many", "decompression_rate", "decompression_rate_many",
+        "average_difference", "average_error", "difference_range", "error_range",
+        "max_error", "max_pw_rel_error", "max_rel_error",
+        "min_error", "min_pw_rel_error", "min_rel_error",
+        "mse", "n", "psnr", "rmse",
+        "value_max", "value_mean", "value_min", "value_range", "value_std", "compression_ratio",
+        "ssim",
+    ]
+    fieldnames = ["compressor name", "input", "error_bound"] + base_metric_keys
+
+    def norm(v):
+        try:
+            return "{:.12g}".format(float(v))
+        except Exception:
+            return str(v).strip() if v is not None else ""
+
+    for compressor in compressors:
+        for input_path in dat_paths:
+            fname = os.path.basename(input_path)
+            if "log10" in fname:
+                print(f"[SKIP] Skipping {fname} because it contains 'log10'")
+                continue
+            input_path = os.path.abspath(input_path)
+            if not os.path.isfile(input_path):
+                print(f"[SKIP] Not a file: {input_path}")
+                continue
+            input_basename = os.path.basename(fname)
             input_base, ext = os.path.splitext(fname)
             suffix = f"_{ext[1:].lower()}" if ext else ""
             var_dir = input_base + suffix
-            output_dir = os.path.join(output_root, dataset_name, var_dir)
-            for f in glob.glob("tmp_*.compressed") + glob.glob("tmp_*.out"):
-                os.remove(f)
+            output_dir = os.path.join(standard_output_root, dataset_name, var_dir)
+            output_csv = os.path.join(output_dir, f"{compressor}_standard.csv")
+            os.makedirs(output_dir, exist_ok=True)
 
+            old_rows = []
+            if os.path.exists(output_csv):
+                try:
+                    with open(output_csv, "r", newline="", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        fn = reader.fieldnames or []
+                        old_rows = list(reader)
+                        for k in fn:
+                            if k not in fieldnames:
+                                fieldnames.append(k)
+                except Exception:
+                    pass
+            index = {}
+            for row in old_rows:
+                comp = str(row.get("compressor name", "")).strip()
+                inp = str(row.get("input", "")).strip()
+                eb_val = norm(row.get("error_bound", ""))
+                if comp and inp and eb_val:
+                    index[(comp, inp, eb_val)] = row
+            added, updated = 0, 0
+
+            input_lower = input_path.lower()
+
+            for eb in error_bounds:
+                key = (compressor, input_basename, norm(eb))
+                if key in index:
+                    print(f"[STANDARD] skip existing {compressor} {input_basename} rel={eb}")
+                    continue
+
+                print(f"\n=== STANDARD {compressor} on {fname} | rel={eb} ===")
+                # CESM 的 .dat 数据是 3600x1800，其它数据集默认用全局 dims（如 512x512x512）
+                if dataset_name.lower() == "cesm":
+                    dims_used = "3600 1800"
+                else:
+                    dims_used = dims
+                cmd = [
+                    PRESSIO,
+                    "-i", input_path,
+                    "-b", f"compressor={compressor}",
+                    "-o", f"rel={eb}",
+                    *[x for d in dims_used.split() for x in ("-d", d)],
+                    "-t", "float",
+                    "-b", "external:launch_metric=print",
+                    "-m", "time",
+                    "-m",  "size",
+                    "-m", "error_stat",
+                    "-m", "ssim",
+                    "-M", "all",
+                ]
+                if input_lower.endswith(".h5") or input_lower.endswith(".hdf5"):
+                    # -i 后必须紧跟文件路径，再插 -I；否则会变成 -i -I ... path 导致 pressio 找不到输入
+                    cmd = cmd[:3] + ["-I", "/native_fields/baryon_density"] + cmd[3:]
+                print("Command (pressio):", " ".join(cmd))
+                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+                if proc.returncode != 0:
+                    print(f"[ERROR] pressio failed for {fname} rel={eb}", file=sys.stderr)
+                    if proc.stderr:
+                        print(proc.stderr[:2000], file=sys.stderr)
+                    continue
+
+                metrics = _parse_pressio_metrics(combined)
+                row = {"compressor name": compressor, "input": input_basename, "error_bound": eb}
+                for k, v in metrics.items():
+                    if k not in fieldnames:
+                        fieldnames.append(k)
+                    row[k] = v
+
+                if key in index:
+                    for k, v in row.items():
+                        if v is not None and v != "":
+                            index[key][k] = v
+                    updated += 1
+                else:
+                    full_row = {k: row.get(k, "") for k in fieldnames}
+                    old_rows.append(full_row)
+                    index[key] = full_row
+                    added += 1
+
+                # 每算完一个 datapoint 立即写回 CSV，避免中途被杀后重复计算
+                with open(output_csv, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                    writer.writeheader()
+                    for r in old_rows:
+                        for k in fieldnames:
+                            if k not in r:
+                                r[k] = ""
+                        writer.writerow(r)
+                print(f"[STANDARD] {compressor} {fname} rel={eb}: written to {output_csv} | added={added}, updated={updated}")
+
+
+def _collect_exxalt_xyz_jobs(input_root: str):
+    """收集待压缩的三轴任务。两种布局：
+    1) prefixed：prefix.x.f32.dat / .y / .z（如 p1/10x32000.x.f32.dat），dims 从 basename 的 NxM 解析。
+    2) flat：目录下直接 x.f32.dat、y.f32.dat、z.f32.dat（如 p125/），dims 用文件字节数/4 一维。
+    返回 [{"kind":"prefixed","prefix":...}, {"kind":"flat","dir":...}, ...]
+    """
+    input_root = os.path.abspath(input_root)
+    jobs = []
+    if not os.path.isdir(input_root):
+        return jobs
+    seen_flat = set()
+    seen_prefixed = set()
+
+    for dirpath, _dirnames, _filenames in os.walk(input_root):
+        dirpath = os.path.abspath(dirpath)
+        # flat：x.f32.dat / y.f32.dat / z.f32.dat 同名在目录根
+        fx = os.path.join(dirpath, "x.f32.dat")
+        fy = os.path.join(dirpath, "y.f32.dat")
+        fz = os.path.join(dirpath, "z.f32.dat")
+        if os.path.isfile(fx) and os.path.isfile(fy) and os.path.isfile(fz):
+            if dirpath not in seen_flat:
+                seen_flat.add(dirpath)
+                jobs.append({"kind": "flat", "dir": dirpath})
+
+        # prefixed：*.x.f32.dat 且同 prefix 有 .y/.z（排除已作为 flat 的 x.f32.dat）
+        for p in sorted(glob.glob(os.path.join(dirpath, "*.x.f32.dat"))):
+            if not p.endswith(".x.f32.dat"):
+                continue
+            if os.path.basename(p) == "x.f32.dat":
+                continue  # 已由 flat 处理
+            prefix = p[: -len(".x.f32.dat")]
+            if os.path.isfile(prefix + ".y.f32.dat") and os.path.isfile(prefix + ".z.f32.dat"):
+                prefix = os.path.abspath(prefix)
+                if prefix not in seen_prefixed:
+                    seen_prefixed.add(prefix)
+                    jobs.append({"kind": "prefixed", "prefix": prefix})
+
+    return jobs
+
+
+def run_standard_exxalt(input_root=None):
+    """对 exxalt/EXAALT 或 LAMMPS-lj 根目录跑 STANDARD pressio（x/y/z 分轴、同 cmd/CSV）。
+    - input_root=None：使用全局 exxalt_root。
+    - input_root 为 str：只跑该目录（设为 EXAALT_ROOT 或 LAMMPS_LJ_ROOT 均可）。
+    - input_root 为 list/tuple：依次跑多个根目录，输出分别在 STANDARD/<basename>/...
+    支持 prefixed（dataset1-5423x3137.x.f32.dat）与 flat（p125/x.f32.dat）；flat 用 size/4 一维。
+    """
+    if input_root is None:
+        input_root = exxalt_root
+    if isinstance(input_root, (list, tuple)):
+        for r in input_root:
+            run_standard_exxalt(r)
+        return
+
+    input_root = os.path.abspath(os.path.expanduser(str(input_root)))
+    if not os.path.isdir(input_root):
+        print(f"[STANDARD_EXXALT] skip: not a directory {input_root}")
+        return
+    jobs = _collect_exxalt_xyz_jobs(input_root)
+    if MAX_FILES is not None:
+        jobs = jobs[:MAX_FILES]
+    if not jobs:
+        print(f"[STANDARD_EXXALT] no x/y/z .f32.dat triplets under {input_root}")
+        return
+    dataset_name = os.path.basename(os.path.normpath(input_root))
+    print(f"[STANDARD_EXXALT] root={input_root} | {len(jobs)} triplet group(s), each axis x/y/z compressed separately")
+
+    base_metric_keys = [
+        "compression_rate", "compression_rate_many", "decompression_rate", "decompression_rate_many",
+        "average_difference", "average_error", "difference_range", "error_range",
+        "max_error", "max_pw_rel_error", "max_rel_error",
+        "min_error", "min_pw_rel_error", "min_rel_error",
+        "mse", "n", "psnr", "rmse",
+        "value_max", "value_mean", "value_min", "value_range", "value_std", "compression_ratio",
+        "ssim",
+    ]
+    fieldnames = ["compressor name", "input", "error_bound"] + base_metric_keys
+
+    def norm(v):
+        try:
+            return "{:.12g}".format(float(v))
+        except Exception:
+            return str(v).strip() if v is not None else ""
+
+    axes = ("x", "y", "z")
+    for compressor in compressors:
+        for job in jobs:
+            if job["kind"] == "prefixed":
+                prefix_path = job["prefix"]
+                dims_str = _exaalt_dims_from_prefix(prefix_path)
+                if not dims_str:
+                    print(f"[SKIP] {os.path.basename(prefix_path)}: cannot parse dims (expect *NxM in name)")
+                    continue
+                dim_list_shared = dims_str.split()
+            else:
+                prefix_path = None
+                dim_list_shared = None  # per-file below
+
+            for axis in axes:
+                if job["kind"] == "prefixed":
+                    input_path = prefix_path + "." + axis + ".f32.dat"
+                else:
+                    input_path = os.path.join(job["dir"], axis + ".f32.dat")
+                if not os.path.isfile(input_path):
+                    print(f"[SKIP] Not a file: {input_path}")
+                    continue
+                input_path = os.path.abspath(input_path)
+                if job["kind"] == "flat":
+                    try:
+                        nfloats = os.path.getsize(input_path) // 4
+                    except OSError:
+                        nfloats = 0
+                    if nfloats <= 0:
+                        print(f"[SKIP] cannot infer dims for {input_path} (empty or unreadable)")
+                        continue
+                    dim_list = [str(nfloats)]
+                else:
+                    dim_list = dim_list_shared
+
+                rel = os.path.relpath(input_path, input_root)
+                # 按轴分目录
+                if job["kind"] == "prefixed":
+                    stem_rel = rel[: -len("." + axis + ".f32.dat")]
+                else:
+                    # flat：按目录 + 轴分子目录，如 p125_x_f32_dat
+                    stem_rel = os.path.join(os.path.relpath(job["dir"], input_root), axis)
+                var_dir = stem_rel.replace(os.sep, "_").replace(".", "_") + "_" + axis + "_f32_dat"
+                input_basename = rel
+                output_dir = os.path.join(standard_output_root, dataset_name, var_dir)
+                output_csv = os.path.join(output_dir, f"{compressor}_standard.csv")
+                os.makedirs(output_dir, exist_ok=True)
+
+                old_rows = []
+                if os.path.exists(output_csv):
+                    try:
+                        with open(output_csv, "r", newline="", encoding="utf-8") as f:
+                            reader = csv.DictReader(f)
+                            fn = reader.fieldnames or []
+                            old_rows = list(reader)
+                            for k in fn:
+                                if k not in fieldnames:
+                                    fieldnames.append(k)
+                    except Exception:
+                        pass
+                index = {}
+                for row in old_rows:
+                    comp = str(row.get("compressor name", "")).strip()
+                    inp = str(row.get("input", "")).strip()
+                    eb_val = norm(row.get("error_bound", ""))
+                    if comp and inp and eb_val:
+                        index[(comp, inp, eb_val)] = row
+                added, updated = 0, 0
+                input_lower = input_path.lower()
+
+                for eb in error_bounds:
+                    key = (compressor, input_basename, norm(eb))
+                    if key in index:
+                        print(f"[STANDARD_EXXALT] skip existing {compressor} {input_basename} rel={eb}")
+                        continue
+
+                    print(f"\n=== STANDARD_EXXALT {compressor} on {rel} | rel={eb} ===")
+                    cmd = [
+                        PRESSIO,
+                        "-i", input_path,
+                        "-b", f"compressor={compressor}",
+                        "-o", f"rel={eb}",
+                        *[x for d in dim_list for x in ("-d", d)],
+                        "-t", "float",
+                        "-b", "external:launch_metric=print",
+                        "-m", "time",
+                        "-m", "size",
+                        "-m", "error_stat",
+                        "-m", "ssim",
+                        "-M", "all",
+                    ]
+                    if input_lower.endswith(".h5") or input_lower.endswith(".hdf5"):
+                        cmd = cmd[:3] + ["-I", "/native_fields/baryon_density"] + cmd[3:]
+                    print("Command (pressio):", " ".join(cmd))
+                    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+                    if proc.returncode != 0:
+                        print(f"[ERROR] pressio failed for {rel} rel={eb}", file=sys.stderr)
+                        if proc.stderr:
+                            print(proc.stderr[:2000], file=sys.stderr)
+                        continue
+
+                    metrics = _parse_pressio_metrics(combined)
+                    row = {"compressor name": compressor, "input": input_basename, "error_bound": eb}
+                    for k, v in metrics.items():
+                        if k not in fieldnames:
+                            fieldnames.append(k)
+                        row[k] = v
+
+                    if key in index:
+                        for k, v in row.items():
+                            if v is not None and v != "":
+                                index[key][k] = v
+                        updated += 1
+                    else:
+                        full_row = {k: row.get(k, "") for k in fieldnames}
+                        old_rows.append(full_row)
+                        index[key] = full_row
+                        added += 1
+
+                    # 每跑完一个 datapoint 立即写 CSV，中断重跑时无需重复计算
+                    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                        writer.writeheader()
+                        for r in old_rows:
+                            for k in fieldnames:
+                                if k not in r:
+                                    r[k] = ""
+                            writer.writerow(r)
+                    print(f"[STANDARD_EXXALT] {compressor} {rel} rel={eb} -> {output_csv} | added={added}, updated={updated}")
+
+                print(f"[STANDARD_EXXALT] {compressor} {rel}: done -> {output_csv} | total added={added}, updated={updated}")
+
+
+# HEDM 固定输入与维度（ge5）
+HEDM_INPUT = "/anvil/projects/x-cis240669/midas/park_ss_ff_270MPa_000510.edf.ge5"
+HEDM_DIMS = "1441 2048 2048"
+hedm_output_root = os.path.join(_SCRIPT_DIR, "outputs", "HEDM")
+
+# DSSIM: 遍历目录下所有 .dat，每个文件一个子目录保存（与 HALO/STANDARD 一致）
+DSSIM_INPUT = "/anvil/projects/x-cis240669/CESM/"
+DSSIM_DIMS = "3600 1800"  # 默认维度，可按需改为 per-file 映射
+dssim_output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
+dssim_dataset_name = os.path.basename(os.path.normpath(DSSIM_INPUT))  # e.g. CESM
+
+
+def run_hedm():
+    """HEDM: 跑 pressio+hedm_external，解析 [QOI] 写入 CSV（逻辑同 run_halo_pressio）。"""
+    script = os.path.join(_SCRIPT_DIR, "run_hedm.py")
+    if not os.path.isfile(script):
+        print(f"[HEDM] skip: run_hedm.py not found at {script}")
+        return
+    if not os.path.isfile(HEDM_INPUT):
+        print(f"[HEDM] skip: input not found {HEDM_INPUT}")
+        return
+    output_dir = os.path.abspath(hedm_output_root)
+    for compressor in compressors:
+        print(f"\n=== HEDM ge5 | {compressor} ===")
+        cmd = [
+            "python", script,
+            "--input", HEDM_INPUT,
+            "--dims", *HEDM_DIMS.split(),
+            "--error-bounds", *error_bounds,
+            "--compressor", compressor,
+            "--output-dir", output_dir,
+        ]
+        print("Command (hedm):", " ".join(cmd))
+        try:
+            subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] HEDM failed for {compressor}.")
+            print(e)
+
+
+def run_dssim():
+    """DSSIM: 遍历 DSSIM_INPUT 下所有 .dat，每个文件一个 folder，跑 pressio+dssim_external 写 CSV（逻辑同 run_hedm）。"""
+    script = os.path.join(_SCRIPT_DIR, "run_dssim.py")
+    if not os.path.isfile(script):
+        print(f"[DSSIM] skip: run_dssim.py not found at {script}")
+        return
+    input_root = os.path.abspath(DSSIM_INPUT)
+    if not os.path.isdir(input_root):
+        print(f"[DSSIM] skip: not a directory {DSSIM_INPUT}")
+        return
+    dat_files = sorted(glob.glob(os.path.join(input_root, "**", "*.dat")))
+    if not dat_files:
+        print(f"[DSSIM] skip: no .dat files under {DSSIM_INPUT}")
+        return
+    print(f"[DSSIM] root={input_root} | {len(dat_files)} .dat file(s)")
+    for dat_path in dat_files:
+        rel = os.path.relpath(dat_path, input_root)
+        # 每个文件一个 folder：CLDHGH/CLDHGH_00.dat -> CLDHGH_CLDHGH_00_dat
+        var_dir = rel.replace(os.sep, "_").rsplit(".", 1)[0] + "_dat"
+        output_dir = os.path.join(dssim_output_root, dssim_dataset_name, var_dir)
+        for compressor in compressors:
+            print(f"\n=== DSSIM {compressor} | {rel} ===")
             cmd = [
-                "python", "main.py",
+                "python", script,
+                "--input", os.path.abspath(dat_path),
+                "--dims", *DSSIM_DIMS.split(),
+                "--error-bounds", *error_bounds,
                 "--compressor", compressor,
-                "--mode", mode,
-                "--dims", dims,
-                "--input", input_path,
-                "--datatype", datatype,
-                "--enable-qcat",
-                "--sweep", *error_bounds,
-                "--output-dir", output_root,
+                "--output-dir", os.path.abspath(output_dir),
             ]
+            print("Command (dssim):", " ".join(cmd))
             try:
-                print("Command (main):", " ".join(cmd))
-                subprocess.run(cmd, check=True)
+                subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
             except subprocess.CalledProcessError as e:
-                print(f"[ERROR] Failed on {fname}. Skipping.")
+                print(f"[ERROR] DSSIM failed for {compressor} | {rel}")
                 print(e)
 
 
-if is_exaalt:
-    run_exaalt()
-else:
-    run_halo()
+# if is_exaalt:
+#     run_exaalt()
+# else:
+#     run_halo()
     # run_standard()
+# run_hedm()
+run_standard()
+# run_dssim()
+# run_halo()
+# run_exaalt()
+# 只跑当前 exxalt_root：
+# run_standard_exxalt()
+# 两个根都跑（EXAALT + LAMMPS-lj）：
+# run_standard_exxalt([EXAALT_ROOT, LAMMPS_LJ_ROOT])
