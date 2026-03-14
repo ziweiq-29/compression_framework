@@ -15,7 +15,7 @@ mode = "REL"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
 # qcat_evaluators = "ssim"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
-error_bounds = ["1e-1", "5e-2", "1e-2", "5e-3", "1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6"]
+error_bounds = ["1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6","1e-1", "5e-2", "1e-2", "5e-3"]
 # error_bounds = ["5e-4","5e-5"]
 error_bounds_tthresh = [float(e) for e in error_bounds]
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -528,8 +528,10 @@ def run_standard_exxalt(input_root=None):
                 print(f"[STANDARD_EXXALT] {compressor} {rel}: done -> {output_csv} | total added={added}, updated={updated}")
 
 
-# HEDM 固定输入与维度（ge5）
-HEDM_INPUT = "/anvil/projects/x-cis240669/midas/park_ss_ff_270MPa_000510.edf.ge5"
+# HEDM 固定输入与维度
+# 先在 MIDAS 里将 ge5 payload 转成 float32 raw，再用该 raw 做压缩输入
+HEDM_HEADER_SOURCE = "/anvil/projects/x-cis240669/midas/park_ss_ff_270MPa_000510.edf.ge5"
+HEDM_INPUT = "/anvil/projects/x-cis240669/MIDAS/FF_HEDM/workflows/park_ss_ff_270MPa_000510.payload.float32.raw"
 HEDM_DIMS = "1441 2048 2048"
 hedm_output_root = os.path.join(_SCRIPT_DIR, "outputs", "HEDM")
 
@@ -541,7 +543,7 @@ dssim_dataset_name = os.path.basename(os.path.normpath(DSSIM_INPUT))  # e.g. CES
 
 
 def run_hedm():
-    """HEDM: 跑 pressio+hedm_external，解析 [QOI] 写入 CSV（逻辑同 run_halo_pressio）。"""
+    """HEDM: 读 float32 payload，跑 pressio+hedm_external，解析 [QOI] 写入 CSV。"""
     script = os.path.join(_SCRIPT_DIR, "run_hedm.py")
     if not os.path.isfile(script):
         print(f"[HEDM] skip: run_hedm.py not found at {script}")
@@ -549,23 +551,29 @@ def run_hedm():
     if not os.path.isfile(HEDM_INPUT):
         print(f"[HEDM] skip: input not found {HEDM_INPUT}")
         return
+    if not os.path.isfile(HEDM_HEADER_SOURCE):
+        print(f"[HEDM] skip: header source not found {HEDM_HEADER_SOURCE}")
+        return
     output_dir = os.path.abspath(hedm_output_root)
     for compressor in compressors:
-        print(f"\n=== HEDM ge5 | {compressor} ===")
-        cmd = [
-            "python", script,
-            "--input", HEDM_INPUT,
-            "--dims", *HEDM_DIMS.split(),
-            "--error-bounds", *error_bounds,
-            "--compressor", compressor,
-            "--output-dir", output_dir,
-        ]
-        print("Command (hedm):", " ".join(cmd))
-        try:
-            subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] HEDM failed for {compressor}.")
-            print(e)
+        print(f"\n=== HEDM float32 payload | {compressor} ===")
+        for eb in error_bounds:
+            # 每次只跑一个 datapoint（一个 error bound），确保该点完成后立即落盘到 CSV
+            cmd = [
+                "python", script,
+                "--input", HEDM_INPUT,
+                "--header-source", HEDM_HEADER_SOURCE,
+                "--dims", *HEDM_DIMS.split(),
+                "--error-bounds", eb,
+                "--compressor", compressor,
+                "--output-dir", output_dir,
+            ]
+            print("Command (hedm):", " ".join(cmd))
+            try:
+                subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
+            except subprocess.CalledProcessError as e:
+                print(f"[ERROR] HEDM failed for {compressor} | rel={eb}.")
+                print(e)
 
 
 def run_dssim():
@@ -611,8 +619,8 @@ def run_dssim():
 # else:
 #     run_halo()
     # run_standard()
-# run_hedm()
-run_standard()
+run_hedm()
+# run_standard()
 # run_dssim()
 # run_halo()
 # run_exaalt()
