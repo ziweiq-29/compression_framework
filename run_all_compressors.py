@@ -28,6 +28,21 @@ compressors = ["sperr","mgard","sz3","zfp"]
 output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
 MAX_FILES = 500
 
+
+def _parse_compressor_env(var_name, default):
+    """Parse env var like 'mgard,sz3' or 'mgard sz3' into a compressor list."""
+    raw = os.environ.get(var_name, "")
+    if not raw or not raw.strip():
+        return list(default)
+    items = [x.strip() for x in re.split(r"[,\s]+", raw.strip()) if x.strip()]
+    if not items:
+        return list(default)
+    # Keep user order while removing duplicates.
+    return list(dict.fromkeys(items))
+
+
+hedm_compressors = _parse_compressor_env("HEDM_COMPRESSORS", compressors)
+
 # 按结构检测：子目录下存在 .x/.y/.z.f32.dat 成对则用 RDF(EXAALT-style)，否则用 STANDARD
 _exaalt_datasets = []  # [(dataset_dir, dataset_name, [prefix, ...]), ...]
 if os.path.isdir(root_dir):
@@ -540,6 +555,42 @@ DSSIM_INPUT = "/anvil/projects/x-cis240669/CESM/"
 DSSIM_DIMS = "3600 1800"  # 默认维度，可按需改为 per-file 映射
 dssim_output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
 dssim_dataset_name = os.path.basename(os.path.normpath(DSSIM_INPUT))  # e.g. CESM
+DSSIM_REQUIRED_COLUMNS = [
+    "compressor name", "input", "error_bound", "dssim",
+    "mean", "min", "max", "median", "p90", "p99", "p999", "wasserstein_distance",
+]
+
+
+def _ensure_csv_columns(csv_path, required_columns):
+    """Ensure CSV contains required columns; fill missing values with empty strings."""
+    if not os.path.isfile(csv_path):
+        return
+    try:
+        with open(csv_path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            old_fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as e:
+        print(f"[DSSIM] warn: cannot read CSV for column padding: {csv_path} ({e})")
+        return
+
+    fieldnames = list(old_fieldnames)
+    changed = False
+    for col in required_columns:
+        if col not in fieldnames:
+            fieldnames.append(col)
+            changed = True
+    if not changed:
+        return
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            for col in fieldnames:
+                if col not in row:
+                    row[col] = ""
+            writer.writerow(row)
 
 
 def run_hedm():
@@ -555,7 +606,8 @@ def run_hedm():
         print(f"[HEDM] skip: header source not found {HEDM_HEADER_SOURCE}")
         return
     output_dir = os.path.abspath(hedm_output_root)
-    for compressor in compressors:
+    print(f"[HEDM] compressors={hedm_compressors}")
+    for compressor in hedm_compressors:
         print(f"\n=== HEDM float32 payload | {compressor} ===")
         for eb in error_bounds:
             # 每次只跑一个 datapoint（一个 error bound），确保该点完成后立即落盘到 CSV
@@ -598,20 +650,23 @@ def run_dssim():
         output_dir = os.path.join(dssim_output_root, dssim_dataset_name, var_dir)
         for compressor in compressors:
             print(f"\n=== DSSIM {compressor} | {rel} ===")
-            cmd = [
-                "python", script,
-                "--input", os.path.abspath(dat_path),
-                "--dims", *DSSIM_DIMS.split(),
-                "--error-bounds", *error_bounds,
-                "--compressor", compressor,
-                "--output-dir", os.path.abspath(output_dir),
-            ]
-            print("Command (dssim):", " ".join(cmd))
-            try:
-                subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
-            except subprocess.CalledProcessError as e:
-                print(f"[ERROR] DSSIM failed for {compressor} | {rel}")
-                print(e)
+            output_csv = os.path.join(os.path.abspath(output_dir), f"{compressor}_dssim.csv")
+            for eb in error_bounds:
+                cmd = [
+                    "python", script,
+                    "--input", os.path.abspath(dat_path),
+                    "--dims", *DSSIM_DIMS.split(),
+                    "--error-bounds", eb,
+                    "--compressor", compressor,
+                    "--output-dir", os.path.abspath(output_dir),
+                ]
+                print("Command (dssim):", " ".join(cmd))
+                try:
+                    subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
+                    _ensure_csv_columns(output_csv, DSSIM_REQUIRED_COLUMNS)
+                except subprocess.CalledProcessError as e:
+                    print(f"[ERROR] DSSIM failed for {compressor} | {rel} | rel={eb}")
+                    print(e)
 
 
 # if is_exaalt:
@@ -619,9 +674,9 @@ def run_dssim():
 # else:
 #     run_halo()
     # run_standard()
-run_hedm()
+# run_hedm()
 # run_standard()
-# run_dssim()
+run_dssim()
 # run_halo()
 # run_exaalt()
 # 只跑当前 exxalt_root：

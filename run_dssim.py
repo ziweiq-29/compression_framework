@@ -9,14 +9,11 @@ import sys
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
-DSSIM_EXTERNAL = "/anvil/projects/x-cis240669/DSSIM/pressio_dssim.py"
+DSSIM_EXTERNAL = "/anvil/projects/x-cis240669/DSSIM/run_dssim_pipeline.py"
 DSSIM_PYTHON = "/anvil/projects/x-cis240669/DSSIM/dssim-env/bin/python"
 
-# Parse from pressio output: external:results:dssim<double> = 2.37319e-06
-DSSIM_PATTERN = re.compile(
-    r"external:results:dssim<double>\s*=\s*([0-9.eE+-]+)",
-    re.IGNORECASE,
-)
+QOI_KEYS = ["mean", "min", "max", "median", "p90", "p99", "p999", "wasserstein_distance"]
+DSSIM_PATTERN = re.compile(r"(?:qoi:dssim|external:results:dssim)<double>\s*=\s*([0-9.eE+-]+)", re.IGNORECASE)
 
 
 def output_csv_path(output_dir: str, compressor: str) -> str:
@@ -42,13 +39,25 @@ def main():
     output_csv = output_csv_path(args.output_dir, args.compressor)
     print(f"[DSSIM] Writing results to {output_csv}")
 
-    fieldnames = ["compressor name", "input", "error_bound", "dssim"]
+    fieldnames = ["compressor name", "input", "error_bound", "dssim"] + QOI_KEYS
 
     def norm(v):
         try:
             return "{:.12g}".format(float(v))
         except Exception:
             return str(v).strip() if v is not None else ""
+
+    def has_complete_qoi(row):
+        # Recompute only when QOI columns are missing; dssim can be absent for
+        # pipeline outputs that return distance vectors instead of scalar dssim.
+        required = list(QOI_KEYS)
+        for k in required:
+            v = row.get(k, "")
+            if v is None:
+                return False
+            if isinstance(v, str) and not v.strip():
+                return False
+        return True
 
     old_rows = []
     if os.path.exists(output_csv):
@@ -85,8 +94,13 @@ def main():
     for eb in args.error_bounds:
         key = (compressor_name, input_basename, norm(eb))
         if key in index:
-            print(f"[DSSIM] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
-            continue
+            if has_complete_qoi(index[key]):
+                print(f"[DSSIM] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
+                continue
+            print(
+                f"[DSSIM] recompute missing QOI compressor={compressor_name} "
+                f"input={input_basename} error_bound={eb}"
+            )
 
         print(f"[DSSIM] {input_basename} | rel={eb}")
 
@@ -105,7 +119,6 @@ def main():
         cmd += [
             "-b", "qoi:metric=external",
             "-o", f"external:command={external_cmd}",
-            "-b", "external:launch_metric=print",
             "-o", "external:use_many=1",
             "-m", "qoi", "-M", "all",
         ]
@@ -135,11 +148,22 @@ def main():
             "error_bound": eb,
         }
         matches = DSSIM_PATTERN.findall(combined)
-        if matches:
-            row["dssim"] = float(matches[-1])
-        else:
-            row["dssim"] = None
+        row["dssim"] = float(matches[-1]) if matches else None
+        if row["dssim"] is None and key not in index:
             print(f"[WARN] Missing dssim for eb={eb}")
+
+        for qkey in QOI_KEYS:
+            # Support both logger-style output and pressio metric output:
+            # [QOI]   mean: 1.23
+            # qoi:mean<double> = 1.23
+            pattern = (
+                r"(?:\[QOI\]\s+" + re.escape(qkey) + r"\s*:\s*|"
+                r"qoi:" + re.escape(qkey) + r"<[^>]+>\s*=\s*|"
+                r"external:results:" + re.escape(qkey) + r"<[^>]+>\s*=\s*)"
+                r"([0-9.eE+-]+)"
+            )
+            qmatches = re.findall(pattern, combined, flags=re.IGNORECASE)
+            row[qkey] = float(qmatches[-1]) if qmatches else None
 
         if key in index:
             for k, v in row.items():
@@ -152,14 +176,15 @@ def main():
             index[key] = full_row
             added_rows += 1
 
-    with open(output_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for row in old_rows:
-            for k in fieldnames:
-                if k not in row:
-                    row[k] = ""
-            writer.writerow(row)
+        # Persist every datapoint immediately to avoid losing progress on interruption.
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for existing_row in old_rows:
+                for k in fieldnames:
+                    if k not in existing_row:
+                        existing_row[k] = ""
+                writer.writerow(existing_row)
 
     print(f"[DSSIM] Done. Results written to {output_csv} | updated={updated_rows}, added={added_rows}")
 

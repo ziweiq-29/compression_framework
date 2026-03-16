@@ -2,6 +2,7 @@
 """Run pressio + HEDM external QOI and write results to CSV (same logic as run_halo_pressio.py)."""
 import argparse
 import csv
+import fcntl
 import os
 import re
 import shlex
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 
 PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
 HEDM_EXTERNAL = "/anvil/projects/x-cis240669/MIDAS/FF_HEDM/workflows/hedm_external.py"
@@ -35,6 +37,50 @@ QOI_PATTERNS = {
 def output_csv_path(output_dir: str, compressor: str) -> str:
     os.makedirs(output_dir, exist_ok=True)
     return os.path.join(output_dir, f"{compressor}_hedm.csv")
+
+
+@contextmanager
+def _csv_lock(csv_path: str):
+    lock_path = csv_path + ".lock"
+    with open(lock_path, "w", encoding="utf-8") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
+
+
+def _load_rows(csv_path: str):
+    rows = []
+    if os.path.exists(csv_path):
+        try:
+            with open(csv_path, "r", newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except Exception:
+            rows = []
+    return rows
+
+
+def _build_index(rows, norm_func):
+    idx = {}
+    for row in rows:
+        comp = str(row.get("compressor name", "")).strip()
+        inp = str(row.get("input", "")).strip()
+        eb_val = norm_func(row.get("error_bound", ""))
+        if comp and inp and eb_val:
+            idx[(comp, inp, eb_val)] = row
+    return idx
+
+
+def _write_rows(csv_path: str, rows, fieldnames):
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            for k in fieldnames:
+                if k not in row:
+                    row[k] = ""
+            writer.writerow(row)
 
 
 def _preferred_tmp_base(fallback_dir: str) -> str:
@@ -74,23 +120,6 @@ def main():
         except Exception:
             return str(v).strip() if v is not None else ""
 
-    old_rows = []
-    if os.path.exists(output_csv):
-        try:
-            with open(output_csv, "r", newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                old_rows = list(reader)
-        except Exception:
-            old_rows = []
-
-    index = {}
-    for row in old_rows:
-        comp = str(row.get("compressor name", "")).strip()
-        inp = str(row.get("input", "")).strip()
-        eb_val = norm(row.get("error_bound", ""))
-        if comp and inp and eb_val:
-            index[(comp, inp, eb_val)] = row
-
     compressor_name = args.compressor
     input_basename = os.path.basename(args.input)
     added_rows = 0
@@ -107,9 +136,12 @@ def main():
 
     for eb in args.error_bounds:
         key = (compressor_name, input_basename, norm(eb))
-        if key in index:
-            print(f"[HEDM] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
-            continue
+        with _csv_lock(output_csv):
+            existing_rows = _load_rows(output_csv)
+            existing_index = _build_index(existing_rows, norm)
+            if key in existing_index:
+                print(f"[HEDM] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
+                continue
 
         print(f"[HEDM] {input_basename} | rel={eb}")
         eb_tag = str(eb).replace(".", "p").replace("-", "m")
@@ -139,7 +171,6 @@ def main():
         cmd += [
             "-b", "qoi:metric=external",
             "-o", f"external:command={external_command}",
-            "-b", "external:launch_metric=print",
             "-o", "external:use_many=1",
             "-m", "qoi", "-M", "all",
         ]
@@ -162,6 +193,8 @@ def main():
             print(f"[ERROR] pressio failed for eb={eb}", file=sys.stderr)
             if proc.stderr:
                 print(proc.stderr, file=sys.stderr)
+            if proc.stdout:
+                print(proc.stdout[-4000:], file=sys.stderr)
             continue
 
         combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
@@ -183,25 +216,19 @@ def main():
         if missing:
             print("[WARN] Incomplete QOI row written to CSV")
 
-        if key in index:
-            for k, v in row.items():
-                if v is not None:
-                    index[key][k] = v
-            updated_rows += 1
-        else:
-            full_row = {k: row.get(k, "") for k in fieldnames}
-            old_rows.append(full_row)
-            index[key] = full_row
-            added_rows += 1
-
-    with open(output_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for row in old_rows:
-            for k in fieldnames:
-                if k not in row:
-                    row[k] = ""
-            writer.writerow(row)
+        with _csv_lock(output_csv):
+            existing_rows = _load_rows(output_csv)
+            existing_index = _build_index(existing_rows, norm)
+            if key in existing_index:
+                for k, v in row.items():
+                    if v is not None:
+                        existing_index[key][k] = v
+                updated_rows += 1
+            else:
+                full_row = {k: row.get(k, "") for k in fieldnames}
+                existing_rows.append(full_row)
+                added_rows += 1
+            _write_rows(output_csv, existing_rows, fieldnames)
 
     print(f"[HEDM] Done. Results written to {output_csv} | updated={updated_rows}, added={added_rows}")
 
