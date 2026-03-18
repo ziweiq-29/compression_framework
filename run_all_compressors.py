@@ -607,6 +607,8 @@ def run_hedm():
         return
     output_dir = os.path.abspath(hedm_output_root)
     print(f"[HEDM] compressors={hedm_compressors}")
+    hedm_timeout = os.environ.get("HEDM_TIMEOUT_SEC", "1800").strip() or "1800"
+    hedm_threads = os.environ.get("HEDM_EXTERNAL_THREADS", "1").strip() or "1"
     for compressor in hedm_compressors:
         print(f"\n=== HEDM float32 payload | {compressor} ===")
         for eb in error_bounds:
@@ -619,7 +621,15 @@ def run_hedm():
                 "--error-bounds", eb,
                 "--compressor", compressor,
                 "--output-dir", output_dir,
+                "--pressio-timeout-sec", hedm_timeout,
+                "--external-num-threads", hedm_threads,
             ]
+            if compressor == "sperr":
+                # libpressio option is sperr:nthreads (not pressio:nthreads)
+                cmd += ["--pressio-opts", "sperr:nthreads=5"]
+            if compressor == "mgard":
+                cmd += ["--pressio-opts", "mgard:dev_type_str=openmp"]
+                cmd += ["--pressio-opts", "mgard:nthreads=5"]
             print("Command (hedm):", " ".join(cmd))
             try:
                 subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
@@ -629,7 +639,7 @@ def run_hedm():
 
 
 def run_dssim():
-    """DSSIM: 遍历 DSSIM_INPUT 下所有 .dat，每个文件一个 folder，跑 pressio+dssim_external 写 CSV（逻辑同 run_hedm）。"""
+    """DSSIM: 遍历 DSSIM_INPUT 下所有 .dat，按变量前缀分组后逐组运行并写 CSV。"""
     script = os.path.join(_SCRIPT_DIR, "run_dssim.py")
     if not os.path.isfile(script):
         print(f"[DSSIM] skip: run_dssim.py not found at {script}")
@@ -643,30 +653,44 @@ def run_dssim():
         print(f"[DSSIM] skip: no .dat files under {DSSIM_INPUT}")
         return
     print(f"[DSSIM] root={input_root} | {len(dat_files)} .dat file(s)")
+    grouped = {}
     for dat_path in dat_files:
         rel = os.path.relpath(dat_path, input_root)
-        # 每个文件一个 folder：CLDHGH/CLDHGH_00.dat -> CLDHGH_CLDHGH_00_dat
-        var_dir = rel.replace(os.sep, "_").rsplit(".", 1)[0] + "_dat"
-        output_dir = os.path.join(dssim_output_root, dssim_dataset_name, var_dir)
-        for compressor in compressors:
-            print(f"\n=== DSSIM {compressor} | {rel} ===")
-            output_csv = os.path.join(os.path.abspath(output_dir), f"{compressor}_dssim.csv")
-            for eb in error_bounds:
-                cmd = [
-                    "python", script,
-                    "--input", os.path.abspath(dat_path),
-                    "--dims", *DSSIM_DIMS.split(),
-                    "--error-bounds", eb,
-                    "--compressor", compressor,
-                    "--output-dir", os.path.abspath(output_dir),
-                ]
-                print("Command (dssim):", " ".join(cmd))
-                try:
-                    subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
-                    _ensure_csv_columns(output_csv, DSSIM_REQUIRED_COLUMNS)
-                except subprocess.CalledProcessError as e:
-                    print(f"[ERROR] DSSIM failed for {compressor} | {rel} | rel={eb}")
-                    print(e)
+        rel_no_ext = rel.replace(os.sep, "_").rsplit(".", 1)[0]  # e.g. CLDHGH_CLDHGH_04
+        # Use the first token in filename stem as group prefix:
+        # CLDHGH_04.dat -> CLDHGH
+        # CLDHGH_CLDHGH_04.dat -> CLDHGH
+        stem = os.path.splitext(os.path.basename(dat_path))[0]
+        prefix = stem.split("_", 1)[0] if "_" in stem else stem
+        grouped.setdefault(prefix, []).append((dat_path, rel, rel_no_ext))
+
+    for prefix in sorted(grouped):
+        items = sorted(grouped[prefix], key=lambda x: x[1])
+        print(f"\n[DSSIM] Prefix group: {prefix} | {len(items)} file(s)")
+        for dat_path, rel, rel_no_ext in items:
+            # Keep per-file folder under each prefix:
+            # .../CESM/CLDHGH_CLDHGH/CLDHGH_CLDHGH_04_dat
+            var_dir = rel_no_ext + "_dat"
+            output_dir = os.path.join(dssim_output_root, dssim_dataset_name, prefix, var_dir)
+            for compressor in compressors:
+                print(f"\n=== DSSIM {compressor} | {rel} | group={prefix} ===")
+                output_csv = os.path.join(os.path.abspath(output_dir), f"{compressor}_dssim.csv")
+                for eb in error_bounds:
+                    cmd = [
+                        "python", script,
+                        "--input", os.path.abspath(dat_path),
+                        "--dims", *DSSIM_DIMS.split(),
+                        "--error-bounds", eb,
+                        "--compressor", compressor,
+                        "--output-dir", os.path.abspath(output_dir),
+                    ]
+                    print("Command (dssim):", " ".join(cmd))
+                    try:
+                        subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
+                        _ensure_csv_columns(output_csv, DSSIM_REQUIRED_COLUMNS)
+                    except subprocess.CalledProcessError as e:
+                        print(f"[ERROR] DSSIM failed for {compressor} | {rel} | rel={eb}")
+                        print(e)
 
 
 # if is_exaalt:
@@ -674,9 +698,9 @@ def run_dssim():
 # else:
 #     run_halo()
     # run_standard()
-# run_hedm()
+run_hedm()
 # run_standard()
-run_dssim()
+# run_dssim()
 # run_halo()
 # run_exaalt()
 # 只跑当前 exxalt_root：
