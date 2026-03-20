@@ -179,6 +179,7 @@ def main():
             prefix=f"hedm_{compressor_name}_{eb_tag}_",
             dir=tmp_base,
         )
+        print(f"[HEDM] resultFolder={result_folder}")
         pressio_run_dir = tempfile.mkdtemp(
             prefix=f"pressio_{compressor_name}_{eb_tag}_",
             dir=tmp_base,
@@ -241,7 +242,8 @@ def main():
                 out_text, err_text = proc.communicate()
         finally:
             # Avoid cross-datapoint interference by cleaning ff_MIDAS outputs per run.
-            shutil.rmtree(result_folder, ignore_errors=True)
+            # NOTE: user debugging request: keep `result_folder` for inspection.
+            # shutil.rmtree(result_folder, ignore_errors=True)
             shutil.rmtree(pressio_run_dir, ignore_errors=True)
 
         if proc.returncode != 0:

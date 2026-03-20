@@ -16,14 +16,14 @@ mode = "REL"
 # qcat_evaluators = "ssim"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
 error_bounds = ["1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6","1e-1", "5e-2", "1e-2", "5e-3"]
-# error_bounds = ["5e-4","5e-5"]
+# error_bounds = ["1e-1"]
 error_bounds_tthresh = [float(e) for e in error_bounds]
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # root_dir = "/anvil/projects/x-cis240669/EXAALT"  
 # root_dir = "/anvil/projects/x-cis240669/NYX"  
 # root_dir = "/anvil/projects/x-cis240669/LAMMPS-lj" 
 root_dir = "/anvil/projects/x-cis240669/CESM" 
-compressors = ["sperr","mgard","sz3","zfp"]
+compressors = ["sperr"]
 # compressors = ["sz3"]
 output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
 MAX_FILES = 500
@@ -323,6 +323,146 @@ def run_standard():
                                 r[k] = ""
                         writer.writerow(r)
                 print(f"[STANDARD] {compressor} {fname} rel={eb}: written to {output_csv} | added={added}, updated={updated}")
+
+
+def run_standard_hedm():
+    """
+    HEDM 固定输入（float32 raw）跑 STANDARD pressio，并写 CSV。
+
+    重点：column name / 写入 CSV 的逻辑与 `run_standard()` 保持一致。
+    """
+    # HEDM 输入与 dims 在文件后半段定义；此处函数仅引用它们
+    dataset_name = "HEDM"
+
+    input_path = os.path.abspath(HEDM_INPUT)
+    fname = os.path.basename(input_path)
+    input_basename = os.path.basename(fname)
+    input_base, ext = os.path.splitext(fname)
+    suffix = f"_{ext[1:].lower()}" if ext else ""
+    var_dir = input_base + suffix
+    output_dir = os.path.join(standard_output_root, dataset_name, var_dir)
+    output_dir = os.path.abspath(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 与 run_standard() 保持一致
+    base_metric_keys = [
+        "compression_rate", "compression_rate_many", "decompression_rate", "decompression_rate_many",
+        "average_difference", "average_error", "difference_range", "error_range",
+        "max_error", "max_pw_rel_error", "max_rel_error",
+        "min_error", "min_pw_rel_error", "min_rel_error",
+        "mse", "n", "psnr", "rmse",
+        "value_max", "value_mean", "value_min", "value_range", "value_std", "compression_ratio",
+        "ssim",
+    ]
+    fieldnames = ["compressor name", "input", "error_bound"] + base_metric_keys
+
+    def norm(v):
+        try:
+            return "{:.12g}".format(float(v))
+        except Exception:
+            return str(v).strip() if v is not None else ""
+
+    # HEDM dims 固定：1441 2048 2048
+    dims_used = HEDM_DIMS
+    input_lower = input_path.lower()
+    # pressio: sz3 的多线程由 pressio:nthreads 控制
+    pressio_threads = os.environ.get("PRESSIO_NTHREADS", "96").strip() or "96"
+
+    for compressor in compressors:
+        output_csv = os.path.join(output_dir, f"{compressor}_standard.csv")
+
+        old_rows = []
+        if os.path.exists(output_csv):
+            try:
+                with open(output_csv, "r", newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    fn = reader.fieldnames or []
+                    old_rows = list(reader)
+                    for k in fn:
+                        if k not in fieldnames:
+                            fieldnames.append(k)
+            except Exception:
+                pass
+
+        index = {}
+        for row in old_rows:
+            comp = str(row.get("compressor name", "")).strip()
+            inp = str(row.get("input", "")).strip()
+            eb_val = norm(row.get("error_bound", ""))
+            if comp and inp and eb_val:
+                index[(comp, inp, eb_val)] = row
+
+        added, updated = 0, 0
+        for eb in error_bounds:
+            key = (compressor, input_basename, norm(eb))
+            if key in index:
+                print(f"[STANDARD_HEDM] skip existing {compressor} {input_basename} rel={eb}")
+                continue
+
+            print(f"\n=== STANDARD_HEDM {compressor} on {fname} | rel={eb} ===")
+            NTHREADS_OPT = {
+                "sz3": f"pressio:nthreads={pressio_threads}",
+                "sperr": f"sperr:nthreads={pressio_threads}",
+            }
+            nthreads_args = ["-o", NTHREADS_OPT[compressor]] if compressor in NTHREADS_OPT else []
+            cmd = [
+                PRESSIO,
+                "-i", input_path,
+                "-T", "posix",
+                "-b", f"compressor={compressor}",
+                "-t", "float",
+                "-o", f"rel={eb}",
+                *nthreads_args,
+                *[x for d in dims_used.split() for x in ("-d", d)],
+                "-b", "external:launch_metric=print",
+                "-m", "time",
+                "-m", "size",
+                "-m", "error_stat",
+                "-m", "ssim",
+                "-M", "all",
+            ]
+            # 兼容可能出现的 h5/hdf5：保持与 run_standard() 一致的插 -I 逻辑
+            if input_lower.endswith(".h5") or input_lower.endswith(".hdf5"):
+                cmd = cmd[:3] + ["-I", "/native_fields/baryon_density"] + cmd[3:]
+
+            print("Command (pressio standard hedm):", " ".join(cmd))
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            if proc.returncode != 0:
+                print(f"[ERROR] pressio failed for {fname} rel={eb}", file=sys.stderr)
+                if proc.stderr:
+                    print(proc.stderr[:2000], file=sys.stderr)
+                continue
+
+            metrics = _parse_pressio_metrics(combined)
+            row = {"compressor name": compressor, "input": input_basename, "error_bound": eb}
+            for k, v in metrics.items():
+                if k not in fieldnames:
+                    fieldnames.append(k)
+                row[k] = v
+
+            if key in index:
+                for k, v in row.items():
+                    if v is not None and v != "":
+                        index[key][k] = v
+                updated += 1
+            else:
+                full_row = {k: row.get(k, "") for k in fieldnames}
+                old_rows.append(full_row)
+                index[key] = full_row
+                added += 1
+
+            # 每算完一个 datapoint 立即写回 CSV，避免中途被杀后重复计算
+            with open(output_csv, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                writer.writeheader()
+                for r in old_rows:
+                    for k in fieldnames:
+                        if k not in r:
+                            r[k] = ""
+                    writer.writerow(r)
+
+            print(f"[STANDARD_HEDM] {compressor} {fname} rel={eb}: written to {output_csv} | added={added}, updated={updated}")
 
 
 def _collect_exxalt_xyz_jobs(input_root: str):
@@ -693,17 +833,72 @@ def run_dssim():
                         print(e)
 
 
+def run_fidelity():
+    """Fidelity: 先跑指定子目录（当前默认仅 a3c8），跑 compress_parallel + calc_fidelity 写 CSV。"""
+    fidelity_root = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors"
+    ref_file = "stdout.1.0.res.npy"
+    run_fidelity_py = os.path.join(_SCRIPT_DIR, "run_fidelity.py")
+    if not os.path.isfile(run_fidelity_py):
+        print(f"[FIDELITY] skip: missing {run_fidelity_py}")
+        return
+    if not os.path.isdir(fidelity_root):
+        print(f"[FIDELITY] skip: not a directory {fidelity_root}")
+        return
+    # Choose folders via env var (default: a3c8).
+    # Example: FIDELITY_FOLDERS="a3c8 b3c2" or "a3c8,b3c2"
+    raw_folders = os.environ.get("FIDELITY_FOLDERS", "a3c8").strip()
+    folder_names = [x.strip() for x in re.split(r"[,\s]+", raw_folders) if x.strip()]
+    folders = []
+    for name in folder_names:
+        cand = os.path.join(fidelity_root, name)
+        if os.path.isfile(os.path.join(cand, ref_file)):
+            folders.append(cand)
+    if not folders:
+        print(f"[FIDELITY] skip: missing {ref_file} for folders={folder_names}")
+        return
+
+    # Default: only sz3 (fastest path for this fidelity pipeline).
+    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sz3","sperr","mgard","zfp"])
+    fidelity_error_option = os.environ.get("FIDELITY_ERROR_OPTION", "auto").strip() or "auto"
+
+    fidelity_output_root = os.path.join(_SCRIPT_DIR, "outputs", "FIDELITY")
+    os.makedirs(fidelity_output_root, exist_ok=True)
+
+    for compressor in fidelity_compressors:
+        print(f"\n[FIDELITY] compressor={compressor} | folders={len(folders)}")
+        output_dir = os.path.abspath(fidelity_output_root)
+        cmd = [
+            "python",
+            run_fidelity_py,
+            "--folders",
+            *folders,
+            "--error-bounds",
+            *error_bounds,
+            "--compressor",
+            compressor,
+            "--error-option",
+            fidelity_error_option,
+            "--output-dir",
+            os.path.abspath(output_dir),
+        ]
+        print("[FIDELITY] Command:", " ".join(cmd))
+        subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
+
+
 # if is_exaalt:
 #     run_exaalt()
 # else:
 #     run_halo()
     # run_standard()
-run_hedm()
+# run_hedm()
+# run_standard_hedm()
 # run_standard()
 # run_dssim()
+# run_fidelity()
 # run_halo()
 # run_exaalt()
 # 只跑当前 exxalt_root：
 # run_standard_exxalt()
 # 两个根都跑（EXAALT + LAMMPS-lj）：
 # run_standard_exxalt([EXAALT_ROOT, LAMMPS_LJ_ROOT])
+run_fidelity()
