@@ -858,7 +858,7 @@ def run_fidelity():
         return
 
     # Default: only sz3 (fastest path for this fidelity pipeline).
-    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sz3","sperr","mgard","zfp"])
+    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sz3","mgard","zfp"])
     fidelity_error_option = os.environ.get("FIDELITY_ERROR_OPTION", "auto").strip() or "auto"
 
     fidelity_output_root = os.path.join(_SCRIPT_DIR, "outputs", "FIDELITY")
