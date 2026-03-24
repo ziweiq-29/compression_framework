@@ -28,12 +28,20 @@ def parse_args():
     p.add_argument("--folders", nargs="+", required=True, help="Folders containing stdout.1.0.res.npy")
     p.add_argument("--error-bounds", nargs="+", required=True, help="Error bounds, e.g. 1e-3 5e-4")
     p.add_argument("--compressor", default="sz3", help="Compressor name for compress_parallel.py")
-    p.add_argument("--error-option", default="auto", help="compress_parallel error-option key")
     p.add_argument("--output-dir", "-o", required=True, help="Output root directory; per-folder subdir will be created")
     p.add_argument("--csv-name", default=None, help="CSV filename (default: <compressor>_fidelity.csv)")
     p.add_argument("--python", default=sys.executable, help="Python executable for child scripts")
     p.add_argument("--pressio-bin", default=DEFAULT_PRESSIO, help="pressio executable path")
-    p.add_argument("--no-force", action="store_true", help="Do not pass --force to compress_parallel.py")
+    p.add_argument(
+        "--no-force",
+        action="store_true",
+        help="传给 sweep：不要对 compress_parallel 加 --force（默认每个 error_bound 都会 --force 重压）",
+    )
+    p.add_argument(
+        "--ref-file",
+        default=None,
+        help="Reference npy basename under each folder (default: env FIDELITY_INPUT_NPY or stdout.1.0.res.npy); must match compress_parallel.INPUT_FILE",
+    )
     return p.parse_args()
 
 
@@ -65,8 +73,6 @@ def main() -> int:
             *args.error_bounds,
             "--compressor",
             args.compressor,
-            "--error-option",
-            args.error_option,
             "--pressio-bin",
             args.pressio_bin,
             "--csv",
@@ -74,8 +80,12 @@ def main() -> int:
             "--python",
             args.python,
         ]
+        # sweep_error_bound_qoi_metrics_to_csv 默认对每个 datapoint 调 compress_parallel 并加 --force
         if args.no_force:
             cmd.append("--no-force")
+
+        ref_file = (args.ref_file or os.environ.get("FIDELITY_INPUT_NPY", "").strip() or "stdout.1.0.res.npy")
+        cmd += ["--ref-file", ref_file]
 
         print("[run_fidelity] Running:", " ".join(cmd), flush=True)
         subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)

@@ -1,6 +1,7 @@
 import csv
 import subprocess
 import glob
+import json
 import os
 import re
 import shutil
@@ -16,17 +17,57 @@ mode = "REL"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
 # qcat_evaluators = "ssim"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
-error_bounds = ["1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6","1e-1", "5e-2", "1e-2", "5e-3"]
+# error_bounds = ["1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6","1e-1", "5e-2", "1e-2", "5e-3"]
+error_bounds = [
+    "1e-6",
+    "5e-6",
+    "1e-5",
+    "5e-5",
+    "1e-4",
+    "5e-4",
+    "1e-3",
+    "5e-3",
+    "1e-2",
+    "5e-2",
+    "1e-1"
+]
+
+error_bounds = [
+    "1e-6",
+    "5e-6",
+    "1e-5",
+    "5e-5",
+    "1e-4",
+    # "5e-4",
+    # "1e-3",
+    "2e-3",
+    # "3e-3",
+    # "4e-3",
+    "5e-3",
+    "1e-2",
+    "5e-2",
+    "1e-1"
+]
+
 # error_bounds = ["1e-1"]
 error_bounds_tthresh = [float(e) for e in error_bounds]
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _fidelity_input_npy_basename() -> str:
+    """Must match compress_parallel.INPUT_FILE when using a sliced reference (basename only)."""
+    v = os.environ.get("FIDELITY_INPUT_NPY", "stdout.1.0.res.npy").strip()
+    return v or "stdout.1.0.res.npy"
+
+
 # root_dir = "/anvil/projects/x-cis240669/EXAALT"  
 # root_dir = "/anvil/projects/x-cis240669/NYX"  
 # root_dir = "/anvil/projects/x-cis240669/LAMMPS-lj" 
-root_dir = "/anvil/projects/x-cis240669/CESM" 
+root_dir = "/anvil/projects/x-cis240669/NYX" 
 compressors = ["sperr"]
-# compressors = ["sz3"]
-output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
+# compressors = ["sz3","sperr","mgard","zfp"]
+# HALO QOI CSV output root
+output_root = os.path.join(_SCRIPT_DIR, "outputs", "HALO")
 MAX_FILES = 500
 
 
@@ -123,6 +164,12 @@ def run_exaalt():
                     print(f"[ERROR] Failed on {input_base} / {compressor}. Skipping.")
                     print(e)
 def run_halo():
+        def norm(v):
+            try:
+                return "{:.12g}".format(float(v))
+            except Exception:
+                return str(v).strip() if v is not None else ""
+
         for fname in _file_list:
             if "log10" in fname:
                 print(f"[SKIP] Skipping {fname} because it contains 'log10'")
@@ -134,13 +181,38 @@ def run_halo():
                 suffix = f"_{ext[1:].lower()}" if ext else ""
                 var_dir = input_base + suffix
                 output_dir = os.path.join(output_root, dataset_name, var_dir)
+                output_csv = os.path.join(output_dir, f"{compressor}_halo.csv")
+                input_basename = os.path.basename(input_path)
+
+                existing = set()
+                if os.path.exists(output_csv):
+                    try:
+                        with open(output_csv, "r", newline="", encoding="utf-8") as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                comp = str(row.get("compressor name", "")).strip()
+                                inp = str(row.get("input", "")).strip()
+                                eb_val = norm(row.get("error_bound", ""))
+                                if comp and inp and eb_val:
+                                    existing.add((comp, inp, eb_val))
+                    except Exception:
+                        pass
+
+                missing_bounds = [
+                    eb for eb in error_bounds
+                    if (compressor, input_basename, norm(eb)) not in existing
+                ]
+                if not missing_bounds:
+                    print(f"[HALO] skip existing {compressor} {input_basename}: all {len(error_bounds)} bounds present")
+                    continue
+
                 for f in glob.glob("tmp_*.compressed") + glob.glob("tmp_*.out"):
                     os.remove(f)
                 cmd_halo = [
                     "python", "run_halo_pressio.py",
                     "--input", input_path,
                     "--dims", *dims.split(),
-                    "--error-bounds", *error_bounds,
+                    "--error-bounds", *missing_bounds,
                     "--compressor", compressor,
                     "--datatype", datatype,
                     "--output-dir", output_dir,
@@ -193,11 +265,20 @@ def run_standard():
     """
     # EXAALT 布局时顶层只走了 is_exaalt 分支，未定义 _file_list / dataset_name；此处与顶层 else 一致
     dataset_name = os.path.basename(os.path.normpath(root_dir))
-    # 遍历 root_dir 下所有 .dat（递归），只压缩这些文件
-    dat_paths = sorted(glob.glob(os.path.join(root_dir, "**", "*.dat"), recursive=True))
+    # 遍历 root_dir 下数据文件（递归）：支持 .dat / .h5 / .hdf5
+    candidate_paths = []
+    for pat in ("*.dat", "*.h5", "*.hdf5"):
+        candidate_paths.extend(
+            glob.glob(os.path.join(root_dir, "**", pat), recursive=True)
+        )
+    data_paths = sorted(set(candidate_paths))
     if MAX_FILES is not None:
-        dat_paths = dat_paths[:MAX_FILES]
-    print(f"[STANDARD] root_dir={root_dir} | {len(dat_paths)} .dat file(s)")
+        data_paths = data_paths[:MAX_FILES]
+    print(
+        f"[STANDARD] root_dir={root_dir} | {len(data_paths)} data file(s) "
+        f"(.dat/.h5/.hdf5)",
+        flush=True,
+    )
 
     # CSV 列名只用短名（无 metric: 前缀），如 mse, psnr, ssim
     base_metric_keys = [
@@ -218,7 +299,7 @@ def run_standard():
             return str(v).strip() if v is not None else ""
 
     for compressor in compressors:
-        for input_path in dat_paths:
+        for input_path in data_paths:
             fname = os.path.basename(input_path)
             if "log10" in fname:
                 print(f"[SKIP] Skipping {fname} because it contains 'log10'")
@@ -835,9 +916,9 @@ def run_dssim():
 
 
 def run_fidelity():
-    """Fidelity: 先跑指定子目录（当前默认仅 a3c8），跑 compress_parallel + calc_fidelity 写 CSV。"""
+    """Fidelity: 指定子目录跑 run_fidelity → sweep；CSV 里已有完整 QOI 行的 datapoint 会在 sweep_error_bound_qoi_metrics_to_csv 里 skip。"""
     fidelity_root = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors"
-    ref_file = "stdout.1.0.res.npy"
+    ref_file = _fidelity_input_npy_basename()
     run_fidelity_py = os.path.join(_SCRIPT_DIR, "run_fidelity.py")
     if not os.path.isfile(run_fidelity_py):
         print(f"[FIDELITY] skip: missing {run_fidelity_py}")
@@ -846,8 +927,8 @@ def run_fidelity():
         print(f"[FIDELITY] skip: not a directory {fidelity_root}")
         return
     # Choose folders via env var (default: a3c8).
-    # Example: FIDELITY_FOLDERS="a3c8 b3c2" or "a3c8,b3c2"
-    raw_folders = os.environ.get("FIDELITY_FOLDERS", "a3c8").strip()
+    # Example: FIDELITY_FOLDERS="a11c8 b3c2" or "a11c8,b3c2"
+    raw_folders = os.environ.get("FIDELITY_FOLDERS", "a11c8").strip()
     folder_names = [x.strip() for x in re.split(r"[,\s]+", raw_folders) if x.strip()]
     folders = []
     for name in folder_names:
@@ -859,8 +940,7 @@ def run_fidelity():
         return
 
     # Default: only sz3 (fastest path for this fidelity pipeline).
-    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sz3","mgard","zfp"])
-    fidelity_error_option = os.environ.get("FIDELITY_ERROR_OPTION", "auto").strip() or "auto"
+    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sperr","mgard","zfp" ,"sz3"])
 
     fidelity_output_root = os.path.join(_SCRIPT_DIR, "outputs", "FIDELITY")
     os.makedirs(fidelity_output_root, exist_ok=True)
@@ -877,10 +957,10 @@ def run_fidelity():
             *error_bounds,
             "--compressor",
             compressor,
-            "--error-option",
-            fidelity_error_option,
             "--output-dir",
             os.path.abspath(output_dir),
+            "--ref-file",
+            ref_file,
         ]
         print("[FIDELITY] Command:", " ".join(cmd))
         subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
@@ -889,7 +969,7 @@ def run_fidelity():
 def run_fidelity_standard():
     """
     Fidelity-Standard: 基于 compress_parallel 生成的
-      stdout.1.0.res.npy / stdout_real.out.npy / stdout_imag.out.npy
+      <INPUT_FILE> / stdout_real.out.npy / stdout_imag.out.npy（默认 INPUT_FILE=stdout.1.0.res.npy）
     计算 ssim / psnr / compression ratio，并写入 CSV。
 
     CSV 写入逻辑尽量模仿 `run_standard_hedm()`：
@@ -898,7 +978,7 @@ def run_fidelity_standard():
       - 每个 datapoint 立刻写回，避免中断丢进度
     """
     fidelity_root = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors"
-    ref_file = "stdout.1.0.res.npy"
+    ref_file = _fidelity_input_npy_basename()
 
     calc_script = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors/calc_recon_quality_metrics.py"
     compress_script = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors/compress_parallel.py"
@@ -907,7 +987,7 @@ def run_fidelity_standard():
         return
 
     # Choose folders via env var (default: a3c8), same as run_fidelity().
-    raw_folders = os.environ.get("FIDELITY_FOLDERS", "a3c8").strip()
+    raw_folders = os.environ.get("FIDELITY_FOLDERS", "a11c8").strip()
     folder_names = [x.strip() for x in re.split(r"[,\s]+", raw_folders) if x.strip()]
     folders: list[str] = []
     for name in folder_names:
@@ -919,10 +999,8 @@ def run_fidelity_standard():
         print(f"[FIDELITY_STANDARD] skip: missing {ref_file} for folders={folder_names}")
         return
 
-    # Default compressors and error-option for recon stage.
-    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sz3", "mgard", "zfp"])
-    fidelity_error_option = os.environ.get("FIDELITY_ERROR_OPTION", "auto").strip() or "auto"
-    time_chunk = int(os.environ.get("FIDELITY_TIME_CHUNK", "64"))
+    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sperr"])
+    time_chunk = int(os.environ.get("FIDELITY_TIME_CHUNK", "16"))
 
     # SSIM is expensive; allow turning it off.
     # Default: compute SSIM.
@@ -946,8 +1024,8 @@ def run_fidelity_standard():
     def parse_calc_output(text: str) -> Dict[str, str]:
         out: Dict[str, str] = {}
         for k in recon_metric_keys:
-            # Example line: "  psnr_imag: inf"
-            m = re.search(rf"{re.escape(k)}:\s*([^\n\r]+)", text)
+            # Parse per-line to avoid empty values bleeding into next line.
+            m = re.search(rf"(?m)^\s*{re.escape(k)}:\s*([^\r\n]*)$", text)
             out[k] = m.group(1).strip() if m else ""
         return out
 
@@ -981,8 +1059,10 @@ def run_fidelity_standard():
 
             # Ensure recon columns exist in header.
             if not fieldnames:
-                fieldnames = ["folder", "compressor", "error_bound"] + recon_metric_keys
+                fieldnames = ["folder", "compressor", "error_bound", "error_option"] + recon_metric_keys
             else:
+                if "error_option" not in fieldnames:
+                    fieldnames.append("error_option")
                 for k in recon_metric_keys:
                     if k not in fieldnames:
                         fieldnames.append(k)
@@ -1005,8 +1085,6 @@ def run_fidelity_standard():
                     folder_abs,
                     "--error-bound",
                     str(eb),
-                    "--error-option",
-                    fidelity_error_option,
                     "--time-chunk",
                     str(time_chunk),
                     "--compressor",
@@ -1014,14 +1092,37 @@ def run_fidelity_standard():
                     "--pressio-bin",
                     PRESSIO,
                 ]
-                # compress_parallel 默认不带 --force，这样只在 missing 时重跑
-                if os.environ.get("FIDELITY_FORCE_RECOMPRESS", "").strip().lower() in {"1", "true", "yes"}:
-                    comp_cmd.append("--force")
+                # Always force recompute stdout_real.out.npy / stdout_imag.out.npy.
+                comp_cmd.append("--force")
                 print("[FIDELITY_STANDARD] compress_parallel:", " ".join(comp_cmd), flush=True)
                 subprocess.run(comp_cmd, check=True, cwd=_SCRIPT_DIR)
+                stats_path = os.path.join(folder_abs, "compression_stats.json")
+                stats: Dict[str, object] = {}
+                try:
+                    with open(stats_path, "r", encoding="utf-8") as sf:
+                        stats = json.load(sf)
+                except Exception:
+                    stats = {}
+
+                st_comp = str(stats.get("compressor", "")).strip()
+                st_eb = norm(str(stats.get("error_bound", "")))
+                if st_comp != compressor or st_eb != norm(eb):
+                    raise RuntimeError(
+                        f"[FIDELITY_STANDARD] stale compression_stats.json detected: "
+                        f"expected compressor={compressor}, error_bound={norm(eb)}; "
+                        f"got compressor={st_comp}, error_bound={st_eb}"
+                    )
+
+                # Must match compress input (slice vs full volume). Prefer stats; else FIDELITY_INPUT_NPY; FIDELITY_REF_NPY overrides.
+                ref_npy = str(stats.get("input_file", "")).strip()
+                if not ref_npy:
+                    ref_npy = _fidelity_input_npy_basename()
+                env_ref = os.environ.get("FIDELITY_REF_NPY", "").strip()
+                if env_ref:
+                    ref_npy = env_ref
 
                 # Compute metrics from npy outputs.
-                calc_cmd = [sys.executable, calc_script, "--dir", folder_abs]
+                calc_cmd = [sys.executable, calc_script, "--dir", folder_abs, "--ref-npy", ref_npy]
                 if skip_ssim:
                     calc_cmd.append("--skip-ssim")
                 print("[FIDELITY_STANDARD] calc:", " ".join(calc_cmd), flush=True)
@@ -1033,11 +1134,17 @@ def run_fidelity_standard():
                     metrics = {k: "" for k in recon_metric_keys}
                 else:
                     metrics = parse_calc_output(proc.stdout or "")
+                # Use per-datapoint stats directly to avoid stale/parse contamination.
+                metrics["compression_ratio_npy"] = "{:.15g}".format(float(stats.get("compression_ratio", float("nan"))))
+                # User requested SSIM column to stay empty for now.
+                metrics["ssim_magnitude"] = ""
+                effective_error_option = str(stats.get("resolved_error_option", "")).strip() or "rel"
 
                 row = {
                     "folder": folder_abs,
                     "compressor": compressor,
                     "error_bound": eb if isinstance(eb, str) else str(eb),
+                    "error_option": effective_error_option,
                     **metrics,
                 }
 
@@ -1080,12 +1187,11 @@ def run_fidelity_standard():
 # run_standard_hedm()
 # run_standard()
 # run_dssim()
-# run_fidelity()
-# run_halo()
+run_halo()
 # run_exaalt()
 # 只跑当前 exxalt_root：
 # run_standard_exxalt()
 # 两个根都跑（EXAALT + LAMMPS-lj）：
 # run_standard_exxalt([EXAALT_ROOT, LAMMPS_LJ_ROOT])
 # run_fidelity()
-run_fidelity_standard()
+# run_fidelity_standard()
