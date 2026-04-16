@@ -61,6 +61,21 @@ STD_DIR_RE = re.compile(r"^SDRBENCH-exaalt-copper_(dataset\d+-\d+x\d+)_([xyz])_f
 RDF_DATASET_RE = re.compile(r"^(dataset\d+-\d+x\d+)_f32$")
 
 
+def _compressor_color_map_fixed():
+    """
+    Fixed compressor->color mapping to match HEDM/plot_hedm.py.
+
+    COMPRESSORS = ["sz3", "zfp", "sperr", "mgard"]
+    tab palette order is:
+      sz3   -> tab:blue
+      zfp   -> tab:orange
+      sperr -> tab:green
+      mgard -> tab:red
+    """
+    fixed_colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
+    return {c: fixed_colors[i % len(fixed_colors)] for i, c in enumerate(COMPRESSORS)}
+
+
 def _norm_eb(s: str) -> str:
     t = (s or "").strip()
     if not t:
@@ -243,7 +258,16 @@ def aggregate_mean_by_compressor_and_eb(rows):
     return out_rows
 
 
-def qoi_vs_bit_rate(plot_dir, rows, y_col, ylabel, filename, *, y_bottom=None):
+def qoi_vs_bit_rate(
+    plot_dir,
+    rows,
+    y_col,
+    ylabel,
+    filename,
+    *,
+    y_bottom=None,
+    plot_kind="scatter",
+):
     by_comp = defaultdict(list)
     for r in rows:
         comp = r.get("compressor name", "").strip() or "default"
@@ -259,31 +283,60 @@ def qoi_vs_bit_rate(plot_dir, rows, y_col, ylabel, filename, *, y_bottom=None):
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    colors = (plt.rcParams.get("axes.prop_cycle", None).by_key().get("color", [])
-              if plt.rcParams.get("axes.prop_cycle", None) else [])
-    if not colors:
-        colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown"]
+    comp_colors = _compressor_color_map_fixed()
+    linestyle_cycle = ["-", "--", "-.", ":"]
+    marker_cycle = ["o", "^", "s", "D", "v", "P", "X", "*"]
+    comp_linestyles = {c: linestyle_cycle[i % len(linestyle_cycle)] for i, c in enumerate(COMPRESSORS)}
+    comp_markers = {c: marker_cycle[i % len(marker_cycle)] for i, c in enumerate(COMPRESSORS)}
 
-    for i, comp in enumerate(sorted(by_comp.keys())):
+    ordered_comps = [c for c in COMPRESSORS if c in by_comp] + sorted([c for c in by_comp.keys() if c not in COMPRESSORS])
+    for comp in ordered_comps:
         arr = np.asarray(by_comp[comp], dtype=np.float64)
         if arr.size == 0:
             continue
-        ax.scatter(arr[:, 0], arr[:, 1], color=colors[i % len(colors)], alpha=0.55, s=24, label=comp)
+
+        xx = arr[:, 0]
+        yy = arr[:, 1]
+        color = comp_colors.get(comp, "gray")
+        if plot_kind == "scatter":
+            ax.scatter(xx, yy, color=color, alpha=0.55, s=24, label=comp.upper())
+        elif plot_kind == "line":
+            # log-x plot, so filter non-positive x values.
+            pos_mask = np.isfinite(xx) & (xx > 0) & np.isfinite(yy)
+            xx = xx[pos_mask]
+            yy = yy[pos_mask]
+            if xx.size == 0:
+                continue
+            order = np.argsort(xx)
+            ax.plot(
+                xx[order],
+                yy[order],
+                color=color,
+                alpha=0.9,
+                linewidth=1.6,
+                linestyle=comp_linestyles.get(comp, "-"),
+                marker=comp_markers.get(comp, "o"),
+                markersize=4.5,
+                label=comp.upper(),
+            )
+        else:
+            raise ValueError(f"Unknown plot_kind={plot_kind!r} (expected 'scatter' or 'line')")
 
     ax.set_xscale("log")
     ax.set_yscale("log")
     if y_bottom is not None:
         ax.set_ylim(bottom=float(y_bottom))
-    ax.set_xlabel("Bit rate", fontsize=12, color="black")
-    ax.set_ylabel(ylabel, fontsize=12, color="black")
-    ax.tick_params(axis="both", labelsize=10, colors="black")
+    ax.set_xlabel("Bit rate", fontsize=25, color="black")
+    ax.set_ylabel(ylabel, fontsize=25, color="black")
+    ax.tick_params(axis="both", labelsize=18, colors="black")
     for spine in ax.spines.values():
         spine.set_color("black")
-    leg = ax.legend(fontsize=10)
+    leg = ax.legend(fontsize=25)
     leg.get_frame().set_facecolor("white")
     for t in leg.get_texts():
         t.set_color("black")
-    ax.grid(False)
+    ax.set_axisbelow(True)
+    ax.grid(True, axis="both", which="major", linestyle="--", alpha=0.35)
     fig.tight_layout(pad=1.2)
     out = os.path.join(plot_dir, filename)
     fig.savefig(out, dpi=300, bbox_inches="tight", pad_inches=0.25)
@@ -307,28 +360,26 @@ def scatter_xy_by_compressor(plot_dir, rows, x_col, y_col, xlabel, ylabel, filen
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    colors = (plt.rcParams.get("axes.prop_cycle", None).by_key().get("color", [])
-              if plt.rcParams.get("axes.prop_cycle", None) else [])
-    if not colors:
-        colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown"]
-
-    for i, comp in enumerate(sorted(by_comp.keys())):
+    comp_colors = _compressor_color_map_fixed()
+    ordered_comps = [c for c in COMPRESSORS if c in by_comp] + sorted([c for c in by_comp.keys() if c not in COMPRESSORS])
+    for comp in ordered_comps:
         arr = np.asarray(by_comp[comp], dtype=np.float64)
         if arr.size == 0:
             continue
-        ax.scatter(arr[:, 0], arr[:, 1], color=colors[i % len(colors)], alpha=0.7, s=24, label=comp)
+        ax.scatter(arr[:, 0], arr[:, 1], color=comp_colors.get(comp, "gray"), alpha=0.7, s=24, label=comp.upper())
 
-    ax.set_xlabel(xlabel, fontsize=12, color="black")
-    ax.set_ylabel(ylabel, fontsize=12, color="black")
+    ax.set_xlabel(xlabel, fontsize=25, color="black")
+    ax.set_ylabel(ylabel, fontsize=25, color="black")
     ax.set_yscale("log")
-    ax.tick_params(axis="both", labelsize=10, colors="black")
+    ax.tick_params(axis="both", labelsize=18, colors="black")
     for spine in ax.spines.values():
         spine.set_color("black")
-    leg = ax.legend(fontsize=10)
+    leg = ax.legend(fontsize=25)
     leg.get_frame().set_facecolor("white")
     for t in leg.get_texts():
         t.set_color("black")
-    ax.grid(False)
+    ax.set_axisbelow(True)
+    ax.grid(True, axis="both", which="major", linestyle="--", alpha=0.35)
     fig.tight_layout(pad=1.2)
     out = os.path.join(plot_dir, filename)
     fig.savefig(out, dpi=300, bbox_inches="tight", pad_inches=0.25)
@@ -362,6 +413,7 @@ def main():
         "Wasserstein distance",
         prefix + "wasserstein_vs_bit_rate.png",
         y_bottom=1e-6,
+        plot_kind="line",
     )
     qoi_vs_bit_rate(PLOT_OUT, rows, "p99", "p99", prefix + "p99_vs_bit_rate.png")
     qoi_vs_bit_rate(PLOT_OUT, rows, "p90", "p90", prefix + "p90_vs_bit_rate.png")

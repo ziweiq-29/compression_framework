@@ -26,6 +26,11 @@ HEDM_EXTERNAL_DEFAULT_ARGS = [
 DEFAULT_PRESSIO_TIMEOUT_SEC = 30 * 60
 DEFAULT_EXTERNAL_NUM_THREADS = 1
 
+# Emitted by MIDAS/FF_HEDM/workflows/hedm_pressio.py: wall time of ff_MIDAS subprocess only.
+HEDM_APP_EVAL_RE = re.compile(
+    r"\[HEDM_APP\]\s+app_eval_sec=([0-9.eE+-]+)", re.IGNORECASE
+)
+
 QOI_PATTERNS = {
     "mean": r"\[QOI\]\s+mean\s*:\s*([0-9.eE+-]+)",
     "min": r"\[QOI\]\s+min\s*:\s*([0-9.eE+-]+)",
@@ -125,18 +130,41 @@ def main():
         default=DEFAULT_EXTERNAL_NUM_THREADS,
         help=f"Thread cap for external numpy/BLAS runtime. default={DEFAULT_EXTERNAL_NUM_THREADS}",
     )
+    parser.add_argument(
+        "--force-app-eval",
+        action="store_true",
+        help="Recompute pressio+QOI even when app_eval_sec is already set (or set env HEDM_FORCE_APP_EVAL=1).",
+    )
     args = parser.parse_args()
+
+    force_app_eval = args.force_app_eval or os.environ.get("HEDM_FORCE_APP_EVAL", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if force_app_eval:
+        print("[HEDM] force app_eval_sec: ignoring existing app_eval_sec column / HEDM_FORCE_APP_EVAL=1")
 
     output_csv = output_csv_path(args.output_dir, args.compressor)
     print(f"[HEDM] Writing results to {output_csv}")
 
-    fieldnames = ["compressor name", "input", "error_bound"] + list(QOI_PATTERNS.keys())
+    fieldnames = ["compressor name", "input", "error_bound", "app_eval_sec"] + list(
+        QOI_PATTERNS.keys()
+    )
 
     def norm(v):
         try:
             return "{:.12g}".format(float(v))
         except Exception:
             return str(v).strip() if v is not None else ""
+
+    def has_app_eval_sec(row: dict) -> bool:
+        v = row.get("app_eval_sec", "")
+        if v is None:
+            return False
+        if isinstance(v, str) and not str(v).strip():
+            return False
+        return True
 
     compressor_name = args.compressor
     input_basename = os.path.basename(args.input)
@@ -169,8 +197,14 @@ def main():
         with _csv_lock(output_csv):
             existing_rows = _load_rows(output_csv)
             existing_index = _build_index(existing_rows, norm)
-            if key in existing_index:
-                print(f"[HEDM] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
+            if (
+                key in existing_index
+                and has_app_eval_sec(existing_index[key])
+                and not force_app_eval
+            ):
+                print(
+                    f"[HEDM] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}"
+                )
                 continue
 
         print(f"[HEDM] {input_basename} | rel={eb}")
@@ -256,10 +290,22 @@ def main():
 
         combined = (out_text or "") + "\n" + (err_text or "")
 
+        app_chunks = [float(m) for m in HEDM_APP_EVAL_RE.findall(combined)]
+        if app_chunks:
+            app_eval_str = "{:.15g}".format(sum(app_chunks))
+        else:
+            app_eval_str = ""
+            print(
+                "[WARN] No [HEDM_APP] app_eval_sec lines in pressio output — "
+                f"check MIDAS/FF_HEDM/workflows/hedm_pressio.py (ff_M timing). (eb={eb})",
+                file=sys.stderr,
+            )
+
         row = {
             "compressor name": args.compressor,
             "input": input_basename,
             "error_bound": eb,
+            "app_eval_sec": app_eval_str,
         }
         missing = False
         for qkey, pattern in QOI_PATTERNS.items():
@@ -278,7 +324,7 @@ def main():
             existing_index = _build_index(existing_rows, norm)
             if key in existing_index:
                 for k, v in row.items():
-                    if v is not None:
+                    if v is not None and v != "":
                         existing_index[key][k] = v
                 updated_rows += 1
             else:

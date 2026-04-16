@@ -26,6 +26,9 @@ QOI_PATTERNS = {
     "wasserstein_distance": r"\[QOI\]\s+wasserstein_distance\s*:\s*([0-9.eE+-]+)",
 }
 
+# Emitted by RDF/run_pressio_rdf_pipeline.py around run_pressio_rdf.py subprocess.
+EXAALT_APP_EVAL_RE = re.compile(r"\[EXAALT_APP\]\s+app_eval_sec=([0-9.eE+-]+)", re.IGNORECASE)
+
 def output_csv_path(output_dir: str, compressor: str) -> str:
     os.makedirs(output_dir, exist_ok=True)
     return os.path.join(output_dir, f"{compressor}_rdf.csv")
@@ -82,7 +85,9 @@ def main():
     output_csv = output_csv_path(args.output_dir, args.compressor)
     print(f"[RDF] Writing results to {output_csv}")
 
-    fieldnames = ["compressor name", "input", "error_bound"] + list(QOI_PATTERNS.keys())
+    fieldnames = ["compressor name", "input", "error_bound", "app_eval_sec"] + list(
+        QOI_PATTERNS.keys()
+    )
 
     # 数值标准化，避免 1e-3 和 0.001 被当成不同（参考 main.append_result_to_csv）
     def norm(v):
@@ -109,6 +114,18 @@ def main():
         if comp and inp and eb_val:
             index[(comp, inp, eb_val)] = row
 
+    def has_app_eval_sec(row: dict) -> bool:
+        v = row.get("app_eval_sec", "")
+        if v is None:
+            return False
+        if isinstance(v, str) and not str(v).strip():
+            return False
+        return True
+
+    force_app_eval = os.environ.get("EXAALT_FORCE_APP_EVAL", "").strip().lower() in ("1", "true", "yes")
+    if force_app_eval:
+        print("[RDF] EXAALT_FORCE_APP_EVAL=1: recompute app_eval_sec + QOI", flush=True)
+
     compressor_name = args.compressor
     input_basename = os.path.basename(input_prefix)
     added_rows = 0
@@ -121,7 +138,7 @@ def main():
     try:
         for eb in args.error_bounds:
             key = (compressor_name, input_basename, norm(eb))
-            if key in index:
+            if key in index and has_app_eval_sec(index[key]) and not force_app_eval:
                 print(f"[RDF] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
                 continue
 
@@ -175,11 +192,20 @@ def main():
                 continue
 
             qoi = parse_qoi_from_text(combined)
+            app_chunks = [float(m) for m in EXAALT_APP_EVAL_RE.findall(combined)]
+            app_eval_str = "{:.15g}".format(sum(app_chunks)) if app_chunks else ""
+            if not app_chunks:
+                print(
+                    "[WARN] No [EXAALT_APP] app_eval_sec lines in output; "
+                    "check RDF/run_pressio_rdf_pipeline.py",
+                    file=sys.stderr,
+                )
 
             row = {
                 "compressor name": args.compressor,
                 "input": input_basename,
                 "error_bound": eb,
+                "app_eval_sec": app_eval_str,
                 **qoi,
             }
 
@@ -198,7 +224,10 @@ def main():
             if key in index:
                 target = index[key]
                 for k, v in row.items():
-                    if v is not None and str(target.get(k, "")).strip() == "":
+                    if k == "app_eval_sec":
+                        if v is not None and v != "":
+                            target[k] = v
+                    elif v is not None and str(target.get(k, "")).strip() == "":
                         target[k] = v
                 updated_rows += 1
             else:

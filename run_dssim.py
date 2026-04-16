@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
@@ -14,6 +15,10 @@ DSSIM_PYTHON = "/anvil/projects/x-cis240669/DSSIM/dssim-env/bin/python"
 
 QOI_KEYS = ["mean", "min", "max", "median", "p90", "p99", "p999", "wasserstein_distance"]
 DSSIM_PATTERN = re.compile(r"(?:qoi:dssim|external:results:dssim)<double>\s*=\s*([0-9.eE+-]+)", re.IGNORECASE)
+APP_EVAL_PATTERN = re.compile(
+    r"(?:external:results:app_eval_sec<[^>]+>\s*=\s*|external:app_eval_sec=)([0-9.eE+-]+)",
+    re.IGNORECASE,
+)
 
 
 def output_csv_path(output_dir: str, compressor: str) -> str:
@@ -39,7 +44,7 @@ def main():
     output_csv = output_csv_path(args.output_dir, args.compressor)
     print(f"[DSSIM] Writing results to {output_csv}")
 
-    fieldnames = ["compressor name", "input", "error_bound", "dssim"] + QOI_KEYS
+    fieldnames = ["compressor name", "input", "error_bound", "dssim", "app_eval_sec"] + QOI_KEYS
 
     def norm(v):
         try:
@@ -48,9 +53,9 @@ def main():
             return str(v).strip() if v is not None else ""
 
     def has_complete_qoi(row):
-        # Recompute only when QOI columns are missing; dssim can be absent for
-        # pipeline outputs that return distance vectors instead of scalar dssim.
-        required = list(QOI_KEYS)
+        # Recompute when any QoI column or app_eval_sec is missing.
+        # dssim can be absent for pipeline outputs that return distance vectors.
+        required = ["app_eval_sec"] + list(QOI_KEYS)
         for k in required:
             v = row.get(k, "")
             if v is None:
@@ -125,6 +130,7 @@ def main():
 
         dssim_dir = os.path.dirname(DSSIM_EXTERNAL)
         print("Command (pressio_dssim):", " ".join(cmd))
+        t0 = time.perf_counter()
         proc = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
@@ -133,6 +139,7 @@ def main():
             cwd=dssim_dir,
             env=env,
         )
+        wall_eval_sec = time.perf_counter() - t0
 
         if proc.returncode != 0:
             print(f"[ERROR] pressio failed for eb={eb}", file=sys.stderr)
@@ -141,11 +148,14 @@ def main():
             continue
 
         combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        app_matches = APP_EVAL_PATTERN.findall(combined)
+        app_eval_sec = float(app_matches[-1]) if app_matches else wall_eval_sec
 
         row = {
             "compressor name": args.compressor,
             "input": input_basename,
             "error_bound": eb,
+            "app_eval_sec": app_eval_sec,
         }
         matches = DSSIM_PATTERN.findall(combined)
         row["dssim"] = float(matches[-1]) if matches else None

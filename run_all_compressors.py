@@ -1,4 +1,5 @@
 import csv
+import math
 import subprocess
 import glob
 import json
@@ -6,7 +7,8 @@ import os
 import re
 import shutil
 import sys
-from typing import Dict, Tuple
+import time
+from typing import Dict, List, Tuple
 
 PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressio"
 
@@ -18,37 +20,67 @@ mode = "REL"
 # qcat_evaluators = "ssim"
 # qcat_evaluators = "compareData,ssim,computeErrAutoCorrelation"
 # error_bounds = ["1e-3", "5e-4", "1e-4", "5e-5", "1e-5", "5e-6", "1e-6","1e-1", "5e-2", "1e-2", "5e-3"]
+# error_bounds = [
+#     "1e-6",
+#     "5e-6",
+#     "1e-5",
+#     "5e-5",
+#     "1e-4",
+#     "5e-4",
+#     "1e-3",
+#     "5e-3",
+#     "1e-2",
+#     "5e-2",
+#     "1e-1"
+# ]
+
+# error_bounds = [
+#     "1e-6",
+#     "5e-6",
+#     "1e-5",
+#     "5e-5",
+#     "1e-4",
+#     # "5e-4",
+#     # "1e-3",
+#     "2e-3",
+#     # "3e-3",
+#     # "4e-3",
+#     "5e-3",
+#     "1e-2",
+#     "5e-2",
+#     "1e-1",
+#     "2e-1",
+#     "3e-1",
+#     "4e-1"
+#     # "5e-1",
+#     # "6e-1",
+#     # "7e-1",
+#     # "8e-1",
+#     # "9e-1",
+#     # "1e-0",
+# ]
+# error_bounds = [
+#     "1e-6",
+#     "5e-6",
+#     "1e-5",
+#     "5e-5",
+#     "1e-4",
+#     "5e-4",
+#     "1e-3",
+#     "5e-3",
+#     "1e-2",
+#     "5e-2",
+#     "1e-1",
+#     "2e-1",
+#     "3e-1",
+#     "4e-1",
+# ]
 error_bounds = [
-    "1e-6",
-    "5e-6",
-    "1e-5",
-    "5e-5",
-    "1e-4",
-    "5e-4",
+    # "1e-1",
+    "1e-2",
     "1e-3",
-    "5e-3",
-    "1e-2",
-    "5e-2",
-    "1e-1"
+    "1e-4"
 ]
-
-error_bounds = [
-    "1e-6",
-    "5e-6",
-    "1e-5",
-    "5e-5",
-    "1e-4",
-    # "5e-4",
-    # "1e-3",
-    "2e-3",
-    # "3e-3",
-    # "4e-3",
-    "5e-3",
-    "1e-2",
-    "5e-2",
-    "1e-1"
-]
-
 # error_bounds = ["1e-1"]
 error_bounds_tthresh = [float(e) for e in error_bounds]
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -60,12 +92,13 @@ def _fidelity_input_npy_basename() -> str:
     return v or "stdout.1.0.res.npy"
 
 
-# root_dir = "/anvil/projects/x-cis240669/EXAALT"  
-# root_dir = "/anvil/projects/x-cis240669/NYX"  
-# root_dir = "/anvil/projects/x-cis240669/LAMMPS-lj" 
-root_dir = "/anvil/projects/x-cis240669/NYX" 
-compressors = ["sperr"]
-# compressors = ["sz3","sperr","mgard","zfp"]
+root_dir = "/anvil/projects/x-cis240669/EXAALT"
+# root_dir = "/anvil/projects/x-cis240669/NYX"
+# root_dir = "/anvil/projects/x-cis240669/LAMMPS-lj"
+# 可为目录（递归 *.dat / *.h5 / *.hdf5）或单个数据文件；单文件时输出 dataset 名默认取上两级目录名（如 .../CESM/CLDHGH/x.dat -> CESM），不对则设 STANDARD_REL_ROOT。
+# root_dir = "/anvil/projects/x-cis240669/NYX"
+compressors = ["sz3", "sperr", "zfp","mgard"]
+# 不要写成 ["sperr,sz3,..."] 一个字符串：pressio 会当成多压缩器链，-o rel= 会报 pressio:rel。
 # HALO QOI CSV output root
 output_root = os.path.join(_SCRIPT_DIR, "outputs", "HALO")
 MAX_FILES = 500
@@ -83,7 +116,62 @@ def _parse_compressor_env(var_name, default):
     return list(dict.fromkeys(items))
 
 
-hedm_compressors = _parse_compressor_env("HEDM_COMPRESSORS", compressors)
+def _expand_compressor_list(items):
+    """
+    Split list entries that contain commas into separate pressio compressor ids.
+
+    e.g. ["sperr,sz3,mgard,zfp"] -> ["sperr", "sz3", "mgard", "zfp"].
+
+    A single string with commas is NOT a valid pressio compressor name for -o rel=;
+    pressio treats compressor=a,b,c as a multi-compressor chain, where generic rel=
+    fails with: non existent option for the compressor : pressio:rel
+    """
+    out: List[str] = []
+    for x in items:
+        for part in re.split(r"[,\s]+", str(x).strip()):
+            p = part.strip()
+            if p:
+                out.append(p)
+    return list(dict.fromkeys(out))
+
+
+hedm_compressors = _expand_compressor_list(
+    _parse_compressor_env("HEDM_COMPRESSORS", compressors)
+)
+
+
+def _resolve_standard_inputs(root_spec: str) -> Tuple[str, List[str], str]:
+    """
+    run_standard / HALO：root_spec 可为目录（递归收集数据文件）或单个 .dat/.h5/.hdf5。
+
+    Returns (dataset_name, sorted_abs_data_paths, halo_listing_root).
+    halo_listing_root 与 HALO 的 os.path.join(..., fname) 配合使用。
+    """
+    p = os.path.abspath(os.path.expanduser(str(root_spec).strip()))
+    if os.path.isfile(p):
+        lower = p.lower()
+        if not (lower.endswith(".dat") or lower.endswith(".h5") or lower.endswith(".hdf5")):
+            print(f"[STANDARD] warn: expected .dat/.h5/.hdf5: {p}", flush=True)
+        env_root = os.environ.get("STANDARD_REL_ROOT", "").strip()
+        if env_root:
+            dataset_name = os.path.basename(
+                os.path.normpath(os.path.abspath(os.path.expanduser(env_root)))
+            )
+        else:
+            dataset_name = os.path.basename(os.path.dirname(os.path.dirname(p)))
+        return dataset_name, [p], os.path.dirname(p)
+    if os.path.isdir(p):
+        dataset_name = os.path.basename(os.path.normpath(p))
+        candidate_paths: List[str] = []
+        for pat in ("*.dat", "*.h5", "*.hdf5"):
+            candidate_paths.extend(
+                glob.glob(os.path.join(p, "**", pat), recursive=True)
+            )
+        data_paths = sorted({os.path.abspath(x) for x in candidate_paths})
+        return dataset_name, data_paths, p
+    print(f"[STANDARD] warn: not a file or directory: {root_spec!r}", flush=True)
+    return "UNKNOWN", [], os.getcwd()
+
 
 # 按结构检测：子目录下存在 .x/.y/.z.f32.dat 成对则用 RDF(EXAALT-style)，否则用 STANDARD
 _exaalt_datasets = []  # [(dataset_dir, dataset_name, [prefix, ...]), ...]
@@ -109,11 +197,19 @@ is_exaalt = len(_exaalt_datasets) > 0
 if is_exaalt:
     print(f"[RDF/EXAALT-style] root={root_dir} | {len(_exaalt_datasets)} dataset(s): {[d[1] for d in _exaalt_datasets]}")
 else:
-    dataset_name = os.path.basename(os.path.normpath(root_dir))
-    _file_list = sorted(os.listdir(root_dir))
+    dataset_name, _, halo_listing_root = _resolve_standard_inputs(root_dir)
+    rp = os.path.abspath(os.path.expanduser(root_dir))
+    if os.path.isfile(rp):
+        _file_list = [os.path.basename(rp)]
+    else:
+        _file_list = sorted(os.listdir(halo_listing_root))
     if MAX_FILES is not None:
         _file_list = _file_list[:MAX_FILES]
-    print(f"[STANDARD] root_dir={root_dir} | {len(_file_list)} file(s)")
+    print(
+        f"[STANDARD] root_dir={root_dir} | dataset={dataset_name} | "
+        f"halo_dir={halo_listing_root} | {len(_file_list)} file(s) for HALO",
+        flush=True,
+    )
 
 
 def _exaalt_dims_from_prefix(prefix_path: str):
@@ -175,7 +271,7 @@ def run_halo():
                 print(f"[SKIP] Skipping {fname} because it contains 'log10'")
                 continue
             for compressor in compressors:
-                input_path = os.path.join(root_dir, fname)
+                input_path = os.path.join(halo_listing_root, fname)
                 print(f"\n=== Running {compressor} on {fname} ===")
                 input_base, ext = os.path.splitext(fname)
                 suffix = f"_{ext[1:].lower()}" if ext else ""
@@ -184,7 +280,7 @@ def run_halo():
                 output_csv = os.path.join(output_dir, f"{compressor}_halo.csv")
                 input_basename = os.path.basename(input_path)
 
-                existing = set()
+                halo_index: Dict[tuple, dict] = {}
                 if os.path.exists(output_csv):
                     try:
                         with open(output_csv, "r", newline="", encoding="utf-8") as f:
@@ -194,16 +290,29 @@ def run_halo():
                                 inp = str(row.get("input", "")).strip()
                                 eb_val = norm(row.get("error_bound", ""))
                                 if comp and inp and eb_val:
-                                    existing.add((comp, inp, eb_val))
+                                    halo_index[(comp, inp, eb_val)] = row
                     except Exception:
                         pass
 
-                missing_bounds = [
-                    eb for eb in error_bounds
-                    if (compressor, input_basename, norm(eb)) not in existing
-                ]
+                def _halo_has_app_eval_sec(row: dict) -> bool:
+                    """True if HALO external app time was recorded (see halo/run_pressio_pipeline.py)."""
+                    v = row.get("app_eval_sec", "")
+                    if v is None:
+                        return False
+                    if isinstance(v, str) and not str(v).strip():
+                        return False
+                    return True
+
+                missing_bounds = []
+                for eb in error_bounds:
+                    k = (compressor, input_basename, norm(eb))
+                    if k not in halo_index or not _halo_has_app_eval_sec(halo_index[k]):
+                        missing_bounds.append(eb)
                 if not missing_bounds:
-                    print(f"[HALO] skip existing {compressor} {input_basename}: all {len(error_bounds)} bounds present")
+                    print(
+                        f"[HALO] skip existing {compressor} {input_basename}: "
+                        f"all {len(error_bounds)} bounds present (with app_eval_sec)"
+                    )
                     continue
 
                 for f in glob.glob("tmp_*.compressed") + glob.glob("tmp_*.out"):
@@ -262,21 +371,14 @@ def _parse_pressio_metrics(text):
 def run_standard():
     """非 EXAALT：直接跑 pressio（不跑 main.py），-m error_stat -m ssim -M all，结果写 CSV。
     按输入文件分子目录，与 HALO 一致：outputs/STANDARD/<dataset_name>/<input_base>_<ext>/<compressor>_standard.csv
+
+    root_dir 可为目录（递归 *.dat/.h5/.hdf5）或单个数据文件路径。
     """
-    # EXAALT 布局时顶层只走了 is_exaalt 分支，未定义 _file_list / dataset_name；此处与顶层 else 一致
-    dataset_name = os.path.basename(os.path.normpath(root_dir))
-    # 遍历 root_dir 下数据文件（递归）：支持 .dat / .h5 / .hdf5
-    candidate_paths = []
-    for pat in ("*.dat", "*.h5", "*.hdf5"):
-        candidate_paths.extend(
-            glob.glob(os.path.join(root_dir, "**", pat), recursive=True)
-        )
-    data_paths = sorted(set(candidate_paths))
+    dataset_name, data_paths, _ = _resolve_standard_inputs(root_dir)
     if MAX_FILES is not None:
         data_paths = data_paths[:MAX_FILES]
     print(
-        f"[STANDARD] root_dir={root_dir} | {len(data_paths)} data file(s) "
-        f"(.dat/.h5/.hdf5)",
+        f"[STANDARD] root_dir={root_dir} | dataset={dataset_name} | {len(data_paths)} data file(s)",
         flush=True,
     )
 
@@ -290,13 +392,21 @@ def run_standard():
         "value_max", "value_mean", "value_min", "value_range", "value_std", "compression_ratio",
         "ssim",
     ]
-    fieldnames = ["compressor name", "input", "error_bound"] + base_metric_keys
+    fieldnames = ["compressor name", "input", "error_bound", "qoi_eval_sec"] + base_metric_keys
 
     def norm(v):
         try:
             return "{:.12g}".format(float(v))
         except Exception:
             return str(v).strip() if v is not None else ""
+
+    def has_qoi_eval_sec(row):
+        v = row.get("qoi_eval_sec", "")
+        if v is None:
+            return False
+        if isinstance(v, str) and not v.strip():
+            return False
+        return True
 
     for compressor in compressors:
         for input_path in data_paths:
@@ -342,8 +452,10 @@ def run_standard():
             for eb in error_bounds:
                 key = (compressor, input_basename, norm(eb))
                 if key in index:
-                    print(f"[STANDARD] skip existing {compressor} {input_basename} rel={eb}")
-                    continue
+                    if has_qoi_eval_sec(index[key]):
+                        print(f"[STANDARD] skip existing {compressor} {input_basename} rel={eb}")
+                        continue
+                    print(f"[STANDARD] recompute missing qoi_eval_sec {compressor} {input_basename} rel={eb}")
 
                 print(f"\n=== STANDARD {compressor} on {fname} | rel={eb} ===")
                 # CESM 的 .dat 数据是 3600x1800，其它数据集默认用全局 dims（如 512x512x512）
@@ -369,7 +481,9 @@ def run_standard():
                     # -i 后必须紧跟文件路径，再插 -I；否则会变成 -i -I ... path 导致 pressio 找不到输入
                     cmd = cmd[:3] + ["-I", "/native_fields/baryon_density"] + cmd[3:]
                 print("Command (pressio):", " ".join(cmd))
+                t0 = time.perf_counter()
                 proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                qoi_eval_sec = time.perf_counter() - t0
                 combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
                 if proc.returncode != 0:
                     print(f"[ERROR] pressio failed for {fname} rel={eb}", file=sys.stderr)
@@ -378,7 +492,12 @@ def run_standard():
                     continue
 
                 metrics = _parse_pressio_metrics(combined)
-                row = {"compressor name": compressor, "input": input_basename, "error_bound": eb}
+                row = {
+                    "compressor name": compressor,
+                    "input": input_basename,
+                    "error_bound": eb,
+                    "qoi_eval_sec": qoi_eval_sec,
+                }
                 for k, v in metrics.items():
                     if k not in fieldnames:
                         fieldnames.append(k)
@@ -436,13 +555,21 @@ def run_standard_hedm():
         "value_max", "value_mean", "value_min", "value_range", "value_std", "compression_ratio",
         "ssim",
     ]
-    fieldnames = ["compressor name", "input", "error_bound"] + base_metric_keys
+    fieldnames = ["compressor name", "input", "error_bound", "qoi_eval_sec"] + base_metric_keys
 
     def norm(v):
         try:
             return "{:.12g}".format(float(v))
         except Exception:
             return str(v).strip() if v is not None else ""
+
+    def has_qoi_eval_sec(row):
+        v = row.get("qoi_eval_sec", "")
+        if v is None:
+            return False
+        if isinstance(v, str) and not v.strip():
+            return False
+        return True
 
     # HEDM dims 固定：1441 2048 2048
     dims_used = HEDM_DIMS
@@ -478,8 +605,10 @@ def run_standard_hedm():
         for eb in error_bounds:
             key = (compressor, input_basename, norm(eb))
             if key in index:
-                print(f"[STANDARD_HEDM] skip existing {compressor} {input_basename} rel={eb}")
-                continue
+                if has_qoi_eval_sec(index[key]):
+                    print(f"[STANDARD_HEDM] skip existing {compressor} {input_basename} rel={eb}")
+                    continue
+                print(f"[STANDARD_HEDM] recompute missing qoi_eval_sec {compressor} {input_basename} rel={eb}")
 
             print(f"\n=== STANDARD_HEDM {compressor} on {fname} | rel={eb} ===")
             NTHREADS_OPT = {
@@ -508,7 +637,9 @@ def run_standard_hedm():
                 cmd = cmd[:3] + ["-I", "/native_fields/baryon_density"] + cmd[3:]
 
             print("Command (pressio standard hedm):", " ".join(cmd))
+            t0 = time.perf_counter()
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            qoi_eval_sec = time.perf_counter() - t0
             combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
             if proc.returncode != 0:
                 print(f"[ERROR] pressio failed for {fname} rel={eb}", file=sys.stderr)
@@ -517,7 +648,12 @@ def run_standard_hedm():
                 continue
 
             metrics = _parse_pressio_metrics(combined)
-            row = {"compressor name": compressor, "input": input_basename, "error_bound": eb}
+            row = {
+                "compressor name": compressor,
+                "input": input_basename,
+                "error_bound": eb,
+                "qoi_eval_sec": qoi_eval_sec,
+            }
             for k, v in metrics.items():
                 if k not in fieldnames:
                     fieldnames.append(k)
@@ -772,15 +908,52 @@ HEDM_INPUT = "/anvil/projects/x-cis240669/MIDAS/FF_HEDM/workflows/park_ss_ff_270
 HEDM_DIMS = "1441 2048 2048"
 hedm_output_root = os.path.join(_SCRIPT_DIR, "outputs", "HEDM")
 
-# DSSIM: 遍历目录下所有 .dat，每个文件一个子目录保存（与 HALO/STANDARD 一致）
-DSSIM_INPUT = "/anvil/projects/x-cis240669/CESM/"
+# DSSIM: DSSIM_INPUT 可为目录（递归 *.dat）或单个 .dat 文件路径。
+# 单文件且布局为 .../<dataset>/<var>/<file>.dat 时，默认用「文件上两级」作为 dataset 根目录求相对路径；
+# 若 relpath 不对，请设置环境变量 DSSIM_REL_ROOT 指向 dataset 根（如 .../CESM）。
+# DSSIM_INPUT = "/anvil/projects/x-cis240669/CESM/"
+DSSIM_INPUT = "/anvil/projects/x-cis240669/CESM"
 DSSIM_DIMS = "3600 1800"  # 默认维度，可按需改为 per-file 映射
 dssim_output_root = os.path.join(_SCRIPT_DIR, "outputs", "DSSIM")
-dssim_dataset_name = os.path.basename(os.path.normpath(DSSIM_INPUT))  # e.g. CESM
+dssim_dataset_name = os.path.basename(os.path.normpath(DSSIM_INPUT))  # e.g. CESM（目录模式）；单文件时在 run_dssim 内按根目录重算
 DSSIM_REQUIRED_COLUMNS = [
-    "compressor name", "input", "error_bound", "dssim",
+    "compressor name", "input", "error_bound", "dssim", "app_eval_sec",
     "mean", "min", "max", "median", "p90", "p99", "p999", "wasserstein_distance",
 ]
+
+dssim_compressors = _expand_compressor_list(
+    _parse_compressor_env("DSSIM_COMPRESSORS", compressors)
+)
+
+
+def _resolve_dssim_input_root_and_files(dssim_input: str) -> Tuple[str, List[str]]:
+    """Return (input_root, dat_files). input_root is used for relpath → output folder names."""
+    p = os.path.abspath(os.path.expanduser(dssim_input.strip()))
+    if os.path.isfile(p):
+        if not p.lower().endswith(".dat"):
+            print(f"[DSSIM] skip: not a .dat file: {p}")
+            return "", []
+        env_root = os.environ.get("DSSIM_REL_ROOT", "").strip()
+        if env_root:
+            input_root = os.path.abspath(os.path.expanduser(env_root))
+        else:
+            # .../CESM/CLDHGH/CLDHGH_00.dat -> .../CESM
+            input_root = os.path.dirname(os.path.dirname(p))
+        dat_files = [p]
+        rel = os.path.relpath(p, input_root)
+        if rel.startswith(".."):
+            print(
+                f"[DSSIM] skip: file is not under inferred root {input_root!r}.\n"
+                f"  Set env DSSIM_REL_ROOT to the dataset directory that contains this file "
+                f"(e.g. the CESM folder)."
+            )
+            return "", []
+        return input_root, dat_files
+    if os.path.isdir(p):
+        dat_files = sorted(glob.glob(os.path.join(p, "**", "*.dat"), recursive=True))
+        return p, dat_files
+    print(f"[DSSIM] skip: not a file or directory: {dssim_input!r}")
+    return "", []
 
 
 def _ensure_csv_columns(csv_path, required_columns):
@@ -816,7 +989,9 @@ def _ensure_csv_columns(csv_path, required_columns):
 
 
 def run_hedm():
-    """HEDM: 读 float32 payload，跑 pressio+hedm_external，解析 [QOI] 写入 CSV。"""
+    """HEDM: 读 float32 payload，跑 pressio+hedm_external，解析 [QOI] 写入 CSV。
+    重算 app_eval_sec（即使 CSV 已有）：export HEDM_FORCE_APP_EVAL=1
+    """
     script = os.path.join(_SCRIPT_DIR, "run_hedm.py")
     if not os.path.isfile(script):
         print(f"[HEDM] skip: run_hedm.py not found at {script}")
@@ -828,12 +1003,56 @@ def run_hedm():
         print(f"[HEDM] skip: header source not found {HEDM_HEADER_SOURCE}")
         return
     output_dir = os.path.abspath(hedm_output_root)
+    hedm_input_basename = os.path.basename(HEDM_INPUT)
     print(f"[HEDM] compressors={hedm_compressors}")
     hedm_timeout = os.environ.get("HEDM_TIMEOUT_SEC", "1800").strip() or "1800"
     hedm_threads = os.environ.get("HEDM_EXTERNAL_THREADS", "1").strip() or "1"
+    hedm_force_app_eval = os.environ.get("HEDM_FORCE_APP_EVAL", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if hedm_force_app_eval:
+        print(
+            "[HEDM] HEDM_FORCE_APP_EVAL=1: recompute all datapoints (refresh app_eval_sec + QOI)",
+            flush=True,
+        )
+
+    def norm_hedm(v):
+        try:
+            return "{:.12g}".format(float(v))
+        except Exception:
+            return str(v).strip() if v is not None else ""
+
+    def _hedm_has_app_eval_sec(row: dict) -> bool:
+        v = row.get("app_eval_sec", "")
+        if v is None:
+            return False
+        if isinstance(v, str) and not str(v).strip():
+            return False
+        return True
+
     for compressor in hedm_compressors:
         print(f"\n=== HEDM float32 payload | {compressor} ===")
+        output_csv = os.path.join(output_dir, f"{compressor}_hedm.csv")
+        hedm_index: Dict[tuple, dict] = {}
+        if os.path.exists(output_csv):
+            try:
+                with open(output_csv, "r", newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        comp = str(row.get("compressor name", "")).strip()
+                        inp = str(row.get("input", "")).strip()
+                        eb_val = norm_hedm(row.get("error_bound", ""))
+                        if comp and inp and eb_val:
+                            hedm_index[(comp, inp, eb_val)] = row
+            except Exception:
+                pass
         for eb in error_bounds:
+            k = (compressor, hedm_input_basename, norm_hedm(eb))
+            if k in hedm_index and _hedm_has_app_eval_sec(hedm_index[k]) and not hedm_force_app_eval:
+                print(f"[HEDM] skip existing {compressor} rel={eb} (has app_eval_sec)")
+                continue
             # 每次只跑一个 datapoint（一个 error bound），确保该点完成后立即落盘到 CSV
             cmd = [
                 "python", script,
@@ -852,6 +1071,8 @@ def run_hedm():
             if compressor == "mgard":
                 cmd += ["--pressio-opts", "mgard:dev_type_str=openmp"]
                 cmd += ["--pressio-opts", "mgard:nthreads=5"]
+            if hedm_force_app_eval:
+                cmd.append("--force-app-eval")
             print("Command (hedm):", " ".join(cmd))
             try:
                 subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
@@ -861,20 +1082,17 @@ def run_hedm():
 
 
 def run_dssim():
-    """DSSIM: 遍历 DSSIM_INPUT 下所有 .dat，按变量前缀分组后逐组运行并写 CSV。"""
+    """DSSIM: DSSIM_INPUT 为目录（递归 *.dat）或单个 .dat；按文件 → error_bound → compressor 顺序跑。"""
     script = os.path.join(_SCRIPT_DIR, "run_dssim.py")
     if not os.path.isfile(script):
         print(f"[DSSIM] skip: run_dssim.py not found at {script}")
         return
-    input_root = os.path.abspath(DSSIM_INPUT)
-    if not os.path.isdir(input_root):
-        print(f"[DSSIM] skip: not a directory {DSSIM_INPUT}")
+    input_root, dat_files = _resolve_dssim_input_root_and_files(DSSIM_INPUT)
+    if not input_root or not dat_files:
         return
-    dat_files = sorted(glob.glob(os.path.join(input_root, "**", "*.dat")))
-    if not dat_files:
-        print(f"[DSSIM] skip: no .dat files under {DSSIM_INPUT}")
-        return
-    print(f"[DSSIM] root={input_root} | {len(dat_files)} .dat file(s)")
+    dataset_name = os.path.basename(os.path.normpath(input_root))
+    print(f"[DSSIM] root={input_root} | dataset={dataset_name} | {len(dat_files)} .dat file(s)")
+    print(f"[DSSIM] compressors={dssim_compressors}")
     grouped = {}
     for dat_path in dat_files:
         rel = os.path.relpath(dat_path, input_root)
@@ -893,11 +1111,11 @@ def run_dssim():
             # Keep per-file folder under each prefix:
             # .../CESM/CLDHGH_CLDHGH/CLDHGH_CLDHGH_04_dat
             var_dir = rel_no_ext + "_dat"
-            output_dir = os.path.join(dssim_output_root, dssim_dataset_name, prefix, var_dir)
-            for compressor in compressors:
-                print(f"\n=== DSSIM {compressor} | {rel} | group={prefix} ===")
-                output_csv = os.path.join(os.path.abspath(output_dir), f"{compressor}_dssim.csv")
-                for eb in error_bounds:
+            output_dir = os.path.join(dssim_output_root, dataset_name, prefix, var_dir)
+            for eb in error_bounds:
+                for compressor in dssim_compressors:
+                    print(f"\n=== DSSIM {rel} | eb={eb} | {compressor} | group={prefix} ===")
+                    output_csv = os.path.join(os.path.abspath(output_dir), f"{compressor}_dssim.csv")
                     cmd = [
                         "python", script,
                         "--input", os.path.abspath(dat_path),
@@ -911,12 +1129,12 @@ def run_dssim():
                         subprocess.run(cmd, check=True, cwd=_SCRIPT_DIR)
                         _ensure_csv_columns(output_csv, DSSIM_REQUIRED_COLUMNS)
                     except subprocess.CalledProcessError as e:
-                        print(f"[ERROR] DSSIM failed for {compressor} | {rel} | rel={eb}")
+                        print(f"[ERROR] DSSIM failed for {rel} | {compressor} | rel={eb}")
                         print(e)
 
 
 def run_fidelity():
-    """Fidelity: 指定子目录跑 run_fidelity → sweep；CSV 里已有完整 QOI 行的 datapoint 会在 sweep_error_bound_qoi_metrics_to_csv 里 skip。"""
+    """Fidelity: 指定子目录跑 run_fidelity → sweep；CSV 里 QOI + app_eval_sec 齐全的 datapoint 会在 sweep 里 skip。"""
     fidelity_root = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors"
     ref_file = _fidelity_input_npy_basename()
     run_fidelity_py = os.path.join(_SCRIPT_DIR, "run_fidelity.py")
@@ -976,6 +1194,10 @@ def run_fidelity_standard():
       - 读取旧 CSV
       - 跳过已存在的 datapoint
       - 每个 datapoint 立刻写回，避免中断丢进度
+
+    pressio 时间：`compress_many` / `decompress_many` 来自 compress_parallel 各 slab 的 -m time 累加（与 CESM 列名一致）。
+    若旧行里时间为空或 0（解析失败占位），会重新跑 compress。
+    强制全部重算：``FIDELITY_STANDARD_FORCE=1``。
     """
     fidelity_root = "/anvil/projects/x-cis240669/riken/extracted/output_stata_vectors"
     ref_file = _fidelity_input_npy_basename()
@@ -999,7 +1221,7 @@ def run_fidelity_standard():
         print(f"[FIDELITY_STANDARD] skip: missing {ref_file} for folders={folder_names}")
         return
 
-    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sperr"])
+    fidelity_compressors = _parse_compressor_env("FIDELITY_COMPRESSORS", ["sperr","mgard","zfp" ,"sz3"])
     time_chunk = int(os.environ.get("FIDELITY_TIME_CHUNK", "16"))
 
     # SSIM is expensive; allow turning it off.
@@ -1013,7 +1235,15 @@ def run_fidelity_standard():
     fidelity_output_root = os.path.join(_SCRIPT_DIR, "outputs", "STANDARD", "FIDELITY")
 
     recon_metric_keys = ["ssim_magnitude", "psnr_magnitude", "psnr_real", "psnr_imag", "compression_ratio_npy"]
-    check_metric_keys = recon_metric_keys if not skip_ssim else recon_metric_keys[1:]
+    # Same semantics as CESM *_standard.csv: slab-summed pressio -m time (compress_parallel).
+    fidelity_timing_keys = ["compress_many", "decompress_many"]
+    check_metric_keys = (recon_metric_keys if not skip_ssim else recon_metric_keys[1:]) + fidelity_timing_keys
+    force_fidelity_standard = os.environ.get("FIDELITY_STANDARD_FORCE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
 
     def norm(v: str) -> str:
         try:
@@ -1029,8 +1259,29 @@ def run_fidelity_standard():
             out[k] = m.group(1).strip() if m else ""
         return out
 
+    def _fidelity_timing_ok(cell: str) -> bool:
+        """Treat empty or non-positive as missing (old bogus '0' from failed pressio time parse)."""
+        s = str(cell).strip()
+        if s == "":
+            return False
+        try:
+            return float(s) > 0.0
+        except (TypeError, ValueError):
+            return False
+
+    def _fidelity_row_complete(r: Dict[str, str]) -> bool:
+        for k in check_metric_keys:
+            if k in fidelity_timing_keys:
+                if not _fidelity_timing_ok(r.get(k, "")):
+                    return False
+            elif str(r.get(k, "")).strip() == "":
+                return False
+        return True
+
     for compressor in fidelity_compressors:
         print(f"\n[FIDELITY_STANDARD] compressor={compressor} | folders={len(folders)}", flush=True)
+        if force_fidelity_standard:
+            print("[FIDELITY_STANDARD] FIDELITY_STANDARD_FORCE=1: will not skip existing rows", flush=True)
         for folder_abs in folders:
             folder_base = os.path.basename(folder_abs.rstrip(os.sep))
             output_csv = os.path.join(fidelity_output_root, folder_base, f"{compressor}_fidelity.csv")
@@ -1059,21 +1310,25 @@ def run_fidelity_standard():
 
             # Ensure recon columns exist in header.
             if not fieldnames:
-                fieldnames = ["folder", "compressor", "error_bound", "error_option"] + recon_metric_keys
+                fieldnames = (
+                    ["folder", "compressor", "error_bound", "error_option"]
+                    + recon_metric_keys
+                    + fidelity_timing_keys
+                )
             else:
                 if "error_option" not in fieldnames:
                     fieldnames.append("error_option")
-                for k in recon_metric_keys:
+                for k in recon_metric_keys + fidelity_timing_keys:
                     if k not in fieldnames:
                         fieldnames.append(k)
 
             added, updated = 0, 0
             for eb in error_bounds:
                 key = (compressor, folder_abs, norm(eb))
-                # Skip if row exists and recon metrics already filled.
-                if key in index:
+                # Skip if row exists and recon + valid pressio timing columns are filled.
+                if key in index and not force_fidelity_standard:
                     r = index[key]
-                    if all(str(r.get(k, "")).strip() != "" for k in check_metric_keys):
+                    if _fidelity_row_complete(r):
                         print(f"[FIDELITY_STANDARD] skip existing folder={folder_base} rel={eb}")
                         continue
 
@@ -1136,6 +1391,22 @@ def run_fidelity_standard():
                     metrics = parse_calc_output(proc.stdout or "")
                 # Use per-datapoint stats directly to avoid stale/parse contamination.
                 metrics["compression_ratio_npy"] = "{:.15g}".format(float(stats.get("compression_ratio", float("nan"))))
+                cm_raw = stats.get("compress_many")
+                try:
+                    cm_f = float(cm_raw) if cm_raw is not None and str(cm_raw).strip() != "" else float("nan")
+                except (TypeError, ValueError):
+                    cm_f = float("nan")
+                metrics["compress_many"] = (
+                    "{:.15g}".format(cm_f) if math.isfinite(cm_f) and cm_f > 0.0 else ""
+                )
+                dm_raw = stats.get("decompress_many")
+                try:
+                    dm_f = float(dm_raw) if dm_raw is not None and str(dm_raw).strip() != "" else float("nan")
+                except (TypeError, ValueError):
+                    dm_f = float("nan")
+                metrics["decompress_many"] = (
+                    "{:.15g}".format(dm_f) if math.isfinite(dm_f) and dm_f > 0.0 else ""
+                )
                 # User requested SSIM column to stay empty for now.
                 metrics["ssim_magnitude"] = ""
                 effective_error_option = str(stats.get("resolved_error_option", "")).strip() or "rel"
@@ -1153,7 +1424,9 @@ def run_fidelity_standard():
 
                 if key in index:
                     for k, v in row.items():
-                        if v is not None and v != "":
+                        if k in fidelity_timing_keys:
+                            index[key][k] = "" if v is None else str(v)
+                        elif v is not None and v != "":
                             index[key][k] = v
                     updated += 1
                 else:
@@ -1187,8 +1460,8 @@ def run_fidelity_standard():
 # run_standard_hedm()
 # run_standard()
 # run_dssim()
-run_halo()
-# run_exaalt()
+# run_halo()
+run_exaalt()
 # 只跑当前 exxalt_root：
 # run_standard_exxalt()
 # 两个根都跑（EXAALT + LAMMPS-lj）：

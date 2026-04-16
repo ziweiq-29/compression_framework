@@ -13,6 +13,11 @@ PRESSIO = "/anvil/projects/x-cis240669/libpressio-env/.spack-env/view/bin/pressi
 # ======================
 # QOI regex patterns
 # ======================
+# Emitted by halo/run_pressio_pipeline.py (wall time of halo_dual_pressio subprocess only).
+HALO_APP_EVAL_RE = re.compile(
+    r"\[HALO_APP\]\s+app_eval_sec=([0-9.eE+-]+)", re.IGNORECASE
+)
+
 QOI_PATTERNS = {
     "mean": r"\[QOI\]\s+mean\s*:\s*([0-9.eE+-]+)",
     "min": r"\[QOI\]\s+min\s*:\s*([0-9.eE+-]+)",
@@ -48,7 +53,9 @@ def main():
 
     print(f"[HALO] Writing results to {output_csv}")
 
-    fieldnames = ["compressor name", "input", "error_bound"] + list(QOI_PATTERNS.keys())
+    fieldnames = ["compressor name", "input", "error_bound", "app_eval_sec"] + list(
+        QOI_PATTERNS.keys()
+    )
 
     # 数值标准化，避免 1e-1 != 0.1（与 main.py append_result_to_csv 一致）
     def norm(v):
@@ -77,6 +84,14 @@ def main():
         if comp and inp and eb_val:
             index[(comp, inp, eb_val)] = row
 
+    def has_app_eval_sec(row: dict) -> bool:
+        v = row.get("app_eval_sec", "")
+        if v is None:
+            return False
+        if isinstance(v, str) and not str(v).strip():
+            return False
+        return True
+
     compressor_name = args.compressor
     input_basename = os.path.basename(args.input)
     added_rows = 0
@@ -84,8 +99,10 @@ def main():
 
     for eb in args.error_bounds:
         key = (compressor_name, input_basename, norm(eb))
-        if key in index:
-            print(f"[HALO] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}")
+        if key in index and has_app_eval_sec(index[key]):
+            print(
+                f"[HALO] skip existing compressor={compressor_name} input={input_basename} error_bound={eb}"
+            )
             continue
 
         print(f"[HALO] {input_basename} | rel={eb}")
@@ -131,11 +148,24 @@ def main():
 
         combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
 
+        app_chunks = [float(m) for m in HALO_APP_EVAL_RE.findall(combined)]
+        if app_chunks:
+            app_eval_total = sum(app_chunks)
+            app_eval_str = "{:.15g}".format(app_eval_total)
+        else:
+            app_eval_str = ""
+            print(
+                "[WARN] No [HALO_APP] app_eval_sec lines in pressio output "
+                f"(eb={eb}); update halo/run_pressio_pipeline.py?",
+                file=sys.stderr,
+            )
+
         # Parse QOI output (pressio may print [QOI] to stdout or stderr)
         row = {
             "compressor name": args.compressor,
             "input": os.path.basename(args.input),
             "error_bound": eb,
+            "app_eval_sec": app_eval_str,
         }
         missing = False
         for qkey, pattern in QOI_PATTERNS.items():
@@ -160,7 +190,7 @@ def main():
         key = (compressor_name, input_basename, norm(eb))
         if key in index:
             for k, v in row.items():
-                if v is not None:
+                if v is not None and v != "":
                     index[key][k] = v
             updated_rows += 1
         else:

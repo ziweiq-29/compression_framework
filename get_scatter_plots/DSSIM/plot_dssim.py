@@ -224,6 +224,7 @@ def qoi_vs_bit_rate(
     xlim=None,
     ylim=None,
     one_minus_y=False,
+    plot_kind="scatter",
 ):
     by_comp_points = {}
     for r in rows:
@@ -253,10 +254,24 @@ def qoi_vs_bit_rate(
         "tab:purple",
         "tab:brown",
     ]
-    comp_names = sorted(by_comp_points.keys())
-    comp_colors = {c: default_colors[i % len(default_colors)] for i, c in enumerate(comp_names)}
+    # Fix compressor->style mapping across all plots.
+    extra_comps = sorted([c for c in by_comp_points.keys() if c not in COMPRESSORS])
+    ordered_comps = [c for c in COMPRESSORS if c in by_comp_points] + extra_comps
 
-    for comp in comp_names:
+    comp_colors = {c: default_colors[i % len(default_colors)] for i, c in enumerate(COMPRESSORS)}
+    # Provide a distinct look per compressor curve.
+    linestyle_cycle = ["-", "--", "-.", ":"]
+    marker_cycle = ["o", "^", "s", "D", "v", "P", "X", "*"]
+    comp_linestyles = {c: linestyle_cycle[i % len(linestyle_cycle)] for i, c in enumerate(COMPRESSORS)}
+    comp_markers = {c: marker_cycle[i % len(marker_cycle)] for i, c in enumerate(COMPRESSORS)}
+
+    # Assign deterministic styles for any unexpected compressor keys.
+    for i, comp in enumerate(extra_comps):
+        comp_colors[comp] = default_colors[(len(COMPRESSORS) + i) % len(default_colors)]
+        comp_linestyles[comp] = linestyle_cycle[(len(COMPRESSORS) + i) % len(linestyle_cycle)]
+        comp_markers[comp] = marker_cycle[(len(COMPRESSORS) + i) % len(marker_cycle)]
+
+    for comp in ordered_comps:
         pts = by_comp_points[comp]
         if not pts:
             continue
@@ -264,7 +279,29 @@ def qoi_vs_bit_rate(
         xx = arr[:, 0]
         yy = arr[:, 1]
         color = comp_colors[comp]
-        ax.scatter(xx, yy, color=color, alpha=0.55, s=24, label=comp)
+        if plot_kind == "scatter":
+            ax.scatter(xx, yy, color=color, alpha=0.55, s=24, label=comp.upper())
+        elif plot_kind == "line":
+            # This plot uses log-x, so filter non-positive x values.
+            pos_mask = np.isfinite(xx) & (xx > 0) & np.isfinite(yy)
+            xx = xx[pos_mask]
+            yy = yy[pos_mask]
+            if xx.size == 0:
+                continue
+            order = np.argsort(xx)
+            ax.plot(
+                xx[order],
+                yy[order],
+                color=color,
+                alpha=0.9,
+                linewidth=1.6,
+                linestyle=comp_linestyles.get(comp, "-"),
+                marker=comp_markers.get(comp, "o"),
+                markersize=4.5,
+                label=comp.upper(),
+            )
+        else:
+            raise ValueError(f"Unknown plot_kind={plot_kind!r} (expected 'scatter' or 'line')")
 
     ax.set_xscale("log")
     if log_y:
@@ -273,16 +310,18 @@ def qoi_vs_bit_rate(
         ax.set_xlim(*xlim)
     if ylim is not None:
         ax.set_ylim(*ylim)
-    ax.set_xlabel("Bit rate", fontsize=12, color="black")
-    ax.set_ylabel(("1 - " + ylabel) if one_minus_y else ylabel, fontsize=12, color="black")
-    ax.tick_params(axis="both", labelsize=10, colors="black")
+    ax.set_xlabel("Bit rate", fontsize=25, color="black")
+    ax.set_ylabel(ylabel, fontsize=25, color="black")
+    ax.tick_params(axis="both", labelsize=18, colors="black")
     for spine in ax.spines.values():
         spine.set_color("black")
-    leg = ax.legend(fontsize=10)
+    leg = ax.legend(fontsize=25)
     leg.get_frame().set_facecolor("white")
     for t in leg.get_texts():
         t.set_color("black")
-    ax.grid(False)
+    ax.set_axisbelow(True)
+    # Draw gridlines only at major ticks (where axis has numeric labels).
+    ax.grid(True, axis="both", which="major", linestyle="--", alpha=0.35)
     fig.tight_layout(pad=1.2)
     out = os.path.join(plot_dir, filename)
     fig.savefig(out, dpi=300, bbox_inches="tight", pad_inches=0.25)
@@ -300,6 +339,7 @@ def scatter_xy_by_compressor(
     filename,
     *,
     log_y=True,
+    one_minus_y=False,
 ):
     by_comp_points = {}
     for r in rows:
@@ -308,6 +348,8 @@ def scatter_xy_by_compressor(
         y = to_float(r.get(y_col))
         if np.isnan(x) or np.isnan(y):
             continue
+        if one_minus_y:
+            y = 1.0 - y
         if log_y and y <= 0:
             y = Y_EPSILON
         if comp not in by_comp_points:
@@ -327,30 +369,36 @@ def scatter_xy_by_compressor(
         "tab:purple",
         "tab:brown",
     ]
-    comp_names = sorted(by_comp_points.keys())
-    comp_colors = {c: default_colors[i % len(default_colors)] for i, c in enumerate(comp_names)}
+    # Fix compressor->color mapping across all plots.
+    extra_comps = sorted([c for c in by_comp_points.keys() if c not in COMPRESSORS])
+    ordered_comps = [c for c in COMPRESSORS if c in by_comp_points] + extra_comps
+    comp_colors = {c: default_colors[i % len(default_colors)] for i, c in enumerate(COMPRESSORS)}
+    for i, comp in enumerate(extra_comps):
+        comp_colors[comp] = default_colors[(len(COMPRESSORS) + i) % len(default_colors)]
 
-    for comp in comp_names:
+    for comp in ordered_comps:
         pts = by_comp_points[comp]
         if not pts:
             continue
         arr = np.asarray(pts, dtype=np.float64)
         xx = arr[:, 0]
         yy = arr[:, 1]
-        ax.scatter(xx, yy, color=comp_colors[comp], alpha=0.7, s=24, label=comp)
+        ax.scatter(xx, yy, color=comp_colors[comp], alpha=0.7, s=24, label=comp.upper())
 
-    ax.set_xlabel(xlabel, fontsize=12, color="black")
-    ax.set_ylabel(ylabel, fontsize=12, color="black")
+    ax.set_xlabel(xlabel, fontsize=25, color="black")
+    ax.set_ylabel(ylabel, fontsize=25, color="black")
     if log_y:
         ax.set_yscale("log")
-    ax.tick_params(axis="both", labelsize=10, colors="black")
+    ax.tick_params(axis="both", labelsize=18, colors="black")
     for spine in ax.spines.values():
         spine.set_color("black")
-    leg = ax.legend(fontsize=10)
+    leg = ax.legend(fontsize=25)
     leg.get_frame().set_facecolor("white")
     for t in leg.get_texts():
         t.set_color("black")
-    ax.grid(False)
+    ax.set_axisbelow(True)
+    # Draw gridlines only at major ticks (where axis has numeric labels).
+    ax.grid(True, axis="both", which="major", linestyle="--", alpha=0.35)
     fig.tight_layout(pad=1.2)
     out = os.path.join(plot_dir, filename)
     fig.savefig(out, dpi=300, bbox_inches="tight", pad_inches=0.25)
@@ -393,10 +441,11 @@ def main():
         PLOT_OUT,
         rows,
         "dssim",
-        "DSSIM",
+        "1-DSSIM",
         prefix + "dssim_vs_bit_rate.png",
         log_y=True,
         one_minus_y=True,
+        plot_kind="line",
     )
     qoi_vs_bit_rate(
         PLOT_OUT,
@@ -461,9 +510,10 @@ def main():
         "psnr",
         "dssim",
         "PSNR (dB)",
-        "DSSIM",
+        "1-DSSIM",
         prefix + "dssim_vs_psnr.png",
-        log_y=False,
+        log_y=True,
+        one_minus_y=True,
     )
     scatter_xy_by_compressor(
         PLOT_OUT,
@@ -471,9 +521,10 @@ def main():
         "ssim",
         "dssim",
         "SSIM",
-        "DSSIM",
+        "1-DSSIM",
         prefix + "dssim_vs_ssim.png",
-        log_y=False,
+        log_y=True,
+        one_minus_y=True,
     )
 
     print("\nAll plots saved under", PLOT_OUT)
